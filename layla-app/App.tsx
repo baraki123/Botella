@@ -5,17 +5,22 @@ import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native"
 import { ChatScreen } from "./src/chat/ChatScreen";
 import { loadCachedSession, type Session } from "./src/auth/anonymous";
 import { SignInScreen } from "./src/auth/SignInScreen";
+import { SettingsScreen } from "./src/settings/SettingsScreen";
 import { theme } from "./src/config/theme";
+
+type Route = "signin" | "chat" | "settings";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [route, setRoute] = useState<Route>("signin");
 
   useEffect(() => {
     let cancelled = false;
     loadCachedSession().then((s) => {
       if (!cancelled) {
         setSession(s);
+        setRoute(s ? "chat" : "signin");
         setLoading(false);
       }
     });
@@ -24,6 +29,16 @@ export default function App() {
     };
   }, []);
 
+  function handleSignedIn(s: Session) {
+    setSession(s);
+    setRoute("chat");
+  }
+
+  function handleSignedOut() {
+    setSession(null);
+    setRoute("signin");
+  }
+
   let body;
   if (loading) {
     body = (
@@ -31,10 +46,12 @@ export default function App() {
         <ActivityIndicator />
       </View>
     );
-  } else if (!session) {
-    body = <SignInScreen onSignedIn={setSession} />;
+  } else if (route === "signin" || !session) {
+    body = <SignInScreen onSignedIn={handleSignedIn} />;
+  } else if (route === "settings") {
+    body = <SettingsScreen onSignedOut={handleSignedOut} />;
   } else {
-    body = <ChatScreen />;
+    body = <ChatScreen onOpenSettings={() => setRoute("settings")} />;
   }
 
   return (

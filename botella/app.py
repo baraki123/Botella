@@ -16,8 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from botella.adapters.http import build_http_router
 from botella.adapters.ws import build_ws_router
-from botella.auth.routes import build_auth_router
+from botella.auth.routes import build_account_router, build_auth_router
 from botella.contract import BotManifest
+from botella.push import build_push_router
 
 
 def create_app(manifest: BotManifest) -> FastAPI:
@@ -37,6 +38,8 @@ def create_app(manifest: BotManifest) -> FastAPI:
     )
 
     app.include_router(build_auth_router(manifest))
+    app.include_router(build_account_router(manifest))
+    app.include_router(build_push_router(manifest))
     app.include_router(build_http_router(manifest))
     app.include_router(build_ws_router(manifest))
 

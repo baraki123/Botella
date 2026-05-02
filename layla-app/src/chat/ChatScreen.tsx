@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -22,7 +23,11 @@ function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function ChatScreen() {
+export interface ChatScreenProps {
+  onOpenSettings?: () => void;
+}
+
+export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const [session, setSession] = useState<Session | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
@@ -205,6 +210,15 @@ export function ChatScreen() {
             ]}
           />
           <Text style={styles.statusText}>{status}</Text>
+          {onOpenSettings ? (
+            <Pressable
+              onPress={onOpenSettings}
+              style={({ pressed }) => [styles.settingsBtn, pressed && { opacity: 0.5 }]}
+              accessibilityLabel="Settings"
+            >
+              <Text style={styles.settingsIcon}>⋯</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -259,6 +273,13 @@ const styles = StyleSheet.create({
     color: theme.text,
   },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  settingsBtn: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 14,
+  },
+  settingsIcon: { fontSize: 22, color: theme.textSubtle, lineHeight: 22 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusText: { color: theme.textSubtle, fontSize: 13 },
   list: { flex: 1 },

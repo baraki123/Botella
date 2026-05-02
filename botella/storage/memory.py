@@ -73,3 +73,13 @@ class MemoryStorage:
         """Convenience: external_id_for(user_id, 'telegram') as int."""
         ext = await self.external_id_for(user_id, "telegram")
         return int(ext) if ext is not None else None
+
+    # ─── Deletion (App Store-required) ───────────────────────────────────
+
+    async def delete_user(self, user_id: str) -> None:
+        async with self._lock:
+            self._sessions.pop(user_id, None)
+            self._users.pop(user_id, None)
+            self._identities = {
+                k: v for k, v in self._identities.items() if v != user_id
+            }

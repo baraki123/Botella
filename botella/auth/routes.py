@@ -40,6 +40,21 @@ class AuthResponse(BaseModel):
     auth: str
 
 
+def build_account_router(manifest: BotManifest) -> APIRouter:
+    """/v1/account — sign-out is client-side (drop the JWT). Account deletion
+    is server-side because App Store 5.1.1(v) requires apps with account
+    creation to provide an in-app delete path."""
+    router = APIRouter(prefix="/v1/account", tags=["account"])
+
+    @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_account(authorization: str = Header(default=None)):
+        user_id = current_user_id_from_header(authorization)
+        await manifest.storage.delete_user(user_id)
+        return None
+
+    return router
+
+
 def build_auth_router(manifest: BotManifest) -> APIRouter:
     router = APIRouter(prefix="/v1/auth", tags=["auth"])
 

@@ -223,6 +223,14 @@ class Storage(Protocol):
         """Merge `patch` into the user record."""
         ...
 
+    async def delete_user(self, user_id: str) -> None:
+        """Wipe everything we hold about a user: sessions, identities,
+        per-user data. Required by App Store policy 5.1.1(v) for any app
+        that supports account creation. Implementations should be
+        idempotent — calling on an unknown user is a no-op.
+        """
+        ...
+
 
 # ─── Manifest ────────────────────────────────────────────────────────────────
 
