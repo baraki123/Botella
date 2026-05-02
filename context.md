@@ -1,0 +1,395 @@
+# botella — context
+
+> **Handoff doc.** A fresh Claude session can read this top-to-bottom and pick up the work cold. Last updated 2026-05-01, end of session that built v0.0.1.
+
+---
+
+## 1. What we're building
+
+**botella** is a Python library that wraps a Telegram-bot's brain (handlers, services, prompts) so the same logic can serve **three transports** at once:
+
+- **Telegram** (existing channel — long-polling or webhook)
+- **Native iOS / Android** via HTTPS + WebSocket (anonymous-first auth)
+- **Web** via the same HTTPS + WS surface
+
+Each forked product (Layla.app, EventFire.app, …) is its **own standalone app** built from the same template (`mobile-template/`), pointed at its own bot's backend. **Not a multi-bot launcher.** That distinction matters — the user has corrected this misread before.
+
+Plus an Expo (React Native + TypeScript) chat-shell template that consumes botella's API. Forked per product with theme + endpoint changes only.
+
+## 2. Why
+
+The user is a **solo builder** running multiple Telegram bots:
+
+- **Layla** (codebase at `~/Desktop/Coding/GombiStar/`) — astrology-lensed personal advisor. Python, python-telegram-bot 21.6, Anthropic Claude, Postgres on Neon, deployed to **Northflank** (project `gombibot`, service `laylabot`). 30-day free trial → $8.88/mo. Already in production on Telegram. Read `GombiStar/context.md` for full product detail.
+- **event-e-fire** (`~/Desktop/Coding/event-e-fire/`) — converts WhatsApp event forwards into Google Calendar links. Python, stateless, no DB.
+- **Gombi Creations** — separate React+Vite web project (not bot-related).
+
+He's built these as Telegram bots for fast traction validation. Now wants them in the **App Store** as native apps — both iOS and Android, polished, paid, App Store-compliant. Doing this per-bot from scratch would be ~1 month each. botella reduces it to: **fork a template, swap a config, ship.**
+
+The other product context that matters: the user is **product-first / PM-style**, prefers terse responses with concrete recommendations, doesn't want planning docs unless asked, and doesn't want backwards-compat hacks. He's deep-Python-experienced, comfortable with React Native conceptually, less hands-on with mobile.
+
+## 3. Architecture
+
+```
+                ┌─────────────────────────────────┐
+                │  bot's existing Python brain    │
+                │  (handlers, services, claude_*) │
+                │  — UNCHANGED in spirit —        │
+                └─────────────┬───────────────────┘
+                              │
+                  ┌───────────▼───────────┐
+                  │   BotManifest         │  ← the ONE integration point per bot
+                  │   - flows[]           │      (each bot writes a botella_manifest.py
+                  │   - triggers{}        │       and a 3-line bot.py: create_app(manifest))
+                  │   - free_chat         │
+                  │   - voice_handler     │
+                  │   - storage           │
+                  └───────────┬───────────┘
+                              │
+                  ┌───────────▼───────────┐
+                  │   runtime.run()       │  ← async dispatcher
+                  │   triggers > flows >  │     trigger > flow state > free_chat
+                  │   free_chat           │     Goto/Start auto-execute next state
+                  └───────────┬───────────┘
+                              │
+                              │  yields OutboundEvents
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+   ┌────▼─────┐         ┌─────▼─────┐         ┌─────▼─────┐
+   │ Telegram │         │   HTTP    │         │ WebSocket │
+   │ adapter  │         │  adapter  │         │  adapter  │
+   │  (PTB)   │         │ POST /v1/ │         │ WSS /v1/  │
+   │  buffer  │         │ messages  │         │  stream   │
+   │ tokens,  │         │ (collect  │         │ (live     │
+   │ flush on │         │  events,  │         │  token-by-│
+   │ complete │         │  return)  │         │  token)   │
+   └──────────┘         └───────────┘         └───────────┘
+```
+
+**Storage** is a Protocol the bot implements (sessions, identity, per-user data). botella ships `MemoryStorage` for tests + toy bot. For Layla, Postgres-backed implementation will live in GombiStar's repo.
+
+## 4. What's built (v0.0.1, all green)
+
+### Python package `botella/`
+
+| File | What it does |
+|---|---|
+| `contract.py` | `InboundMessage`, `OutboundEvent` + helpers (`text/typing/token/complete/quick_replies/media`), `SessionState`, transitions (`WaitFor/Stay/Goto/Done/Start`), `Flow` (decorator-based state registration), `Storage` Protocol, `BotManifest` |
+| `runtime.py` | `async run(msg, manifest)` — the dispatcher. Triggers preempt, then in-flow state, then free chat. `Goto` and `Start` auto-execute the next state with empty input so flows can prompt without wasting a turn. `Done` pops the flow stack (or resets) and merges `carry` into the user record. |
+| `storage/memory.py` | `MemoryStorage` — sessions (deepcopied per load to prevent mid-turn races), identity resolver, per-user dict store. For tests. |
+| `auth/jwt.py` | HS256 mint/verify. 90-day TTL. `BOTELLA_JWT_SECRET` env var; falls back to a known dev secret iff `BOTELLA_ENV in ("", "dev", "test")`. |
+| `auth/routes.py` | `POST /v1/auth/anonymous {device_id}` → JWT. `current_user_id` FastAPI dependency for protected routes. |
+| `adapters/http.py` | `POST /v1/messages {text?, callback_data?, transport}` (Bearer JWT). Runs the dispatcher to completion, returns events as JSON. |
+| `adapters/ws.py` | `WSS /v1/stream?token=<jwt>`. Each inbound JSON frame runs the dispatcher; events stream back as JSON frames. Sends `{"type":"turn_end"}` sentinel after each turn. |
+| `adapters/telegram.py` | Wraps python-telegram-bot 21.x. `build_telegram_application()` for polling; `setup_telegram_webhook()` mounts a webhook receiver inside an existing FastAPI app with optional secret-token validation. `TokenBuffer.ever_added` flag handles complete-text correctly. |
+| `app.py` | `create_app(manifest)` → FastAPI app with CORS, auth router, HTTP router, WS router, `/health`. |
+
+### Examples + tooling
+
+| File | What it does |
+|---|---|
+| `examples/echo_bot/manifest.py` | Toy bot exercising EVERY primitive: `/start` trigger, `intro` flow with `WaitFor`/`Goto`/`Stay`, `Done(carry={...})`, pure-streaming free chat (typing → tokens → complete), `/reset`. |
+| `examples/echo_bot/run.py` | uvicorn entrypoint. |
+| `tests/test_runtime.py` | 3 unit tests: trigger starts flow + entry state, Stay preserves state on validation failure, free chat fires when no flow active. |
+| `tests/test_echo_bot_e2e.py` | 6 tests through the actual HTTP API via Starlette TestClient. Covers auth, full conversation, returning user, reset, two-user isolation. |
+| `tests/test_telegram_adapter.py` | 12 tests: 8 render-event units (typing/text/token-buffer/complete/quick_replies/media + flush rules) + 4 e2e via `drive_inbound` + a `FakeBot` that records every call. |
+| `tests/test_ws_adapter.py` | 4 tests: auth gate, full streaming flow, two parallel WS connections isolated. |
+| `scripts/smoke.py` | Live integration: boots real uvicorn (not TestClient), walks full conversation through HTTPS+WS via `httpx` and `websockets`. **All 12 checks ✓ in ~6ms.** |
+| `scripts/demo.sh` | Boots backend on `0.0.0.0:8000` + Expo dev server on `:8081`. Prints LAN IP for iPhone connection. Uses portable bash 3.2-compatible wait loop. |
+| `scripts/monitor.py` | Drives the Expo web build via Python Playwright. Walks the conversation, saves screenshots to `/tmp/botella-shots/`, prints browser console + page errors. **Works without MCP — same capability.** |
+
+### Mobile template `mobile-template/`
+
+Vanilla Expo SDK 54 + React Native 0.81 + React 19 (TypeScript), web target enabled.
+
+| File | What it does |
+|---|---|
+| `index.ts` | Entry. Imports `react-native-get-random-values` polyfill (Hermes lacks `crypto.getRandomValues`) BEFORE `App`. Order matters — auth's UUID gen needs it. |
+| `App.tsx` | Mounts `<ChatScreen />` inside `<SafeAreaView>`. |
+| `src/config/product.ts` | **The single per-fork file.** name, accent, greeting. `apiUrl` derived dynamically: web uses `window.location.hostname:8000`, native (Expo Go) uses `Constants.expoConfig.hostUri` host. Fork swaps to `https://api.<product>.app` for prod. |
+| `src/config/theme.ts` | Visual tokens (colors, spacing, radius). |
+| `src/auth/anonymous.ts` | Generates a UUID device-id, exchanges for JWT via `POST /v1/auth/anonymous`, stores both in AsyncStorage. `clearSession()` for /reset-style flows. |
+| `src/api/types.ts` | `BotEvent` mirroring `botella.contract.OutboundEvent`. |
+| `src/api/stream.ts` | WS client. Reconnect with exponential backoff. `onEvent` and `onStatus` listener hooks. |
+| `src/chat/ChatScreen.tsx` | The brain. Bootstraps session → opens WS → renders messages. Streaming bubble fills token-by-token; flips off `streaming` flag on complete. Quick-reply chips removed on tap so they can't be tapped twice. Auto-scrolls. Header status dot (green/amber/red). |
+| `src/chat/Bubble.tsx` | User and bot bubbles. Strips HTML tags from bot text (Layla emits `<b>`/`<i>` for Telegram parity; mobile renders plain). Caret `▍` while streaming. |
+| `src/chat/QuickReplies.tsx` | Pill chips below the bubble carrying them. |
+| `src/chat/TypingIndicator.tsx` | Three-dot animated indicator using `Animated`. |
+| `src/chat/Composer.tsx` | TextInput + send button. **On web, Enter sends, Shift+Enter newlines** (multiline TextInput on web defaults to newline-on-Enter — bad chat UX). Native uses keyboard's send key. |
+
+## 5. Contract specifics a new agent must know
+
+These are the parts most likely to be wrong without context.
+
+### `WaitFor` takes only `next_state`
+
+The original design had `WaitFor(next_state, input_type)`. `input_type` was YAGNI for v0 and I dropped it after a real test caught me writing `WaitFor("text", "got_name")` — the test was storing "text" as next_state. Now: `WaitFor("got_name")`.
+
+### `quick_replies` carries its own prompt
+
+Don't emit `text("Pick one") + quick_replies(options, prompt="")` — that's two separate UI cards on Telegram and mobile. Use **one** event: `quick_replies(options, prompt="Pick one")`.
+
+### Free chat is pure streaming
+
+Pattern: `yield typing(); yield token(...); yield token(...); yield complete(full_text)`. Don't yield a separate `text(...)` event at the end — that renders as a duplicate message on Telegram. The `complete` event's text is **only** used when no tokens were streamed (the `TokenBuffer.ever_added` flag tracks this in `adapters/telegram.py`).
+
+### `Done(carry={...})` is the data-out path
+
+When a flow ends, transient `session.data` is wiped. Anything that should persist in the user record must be passed via `Done(carry={...})` — the runtime calls `storage.update_user(user_id, carry)` before resetting.
+
+### Identity resolution at the edge
+
+Adapters resolve `(provider, external_id) → internal user_id` BEFORE calling `runtime.run`. Handlers ALWAYS see the internal `user_id`. The Telegram adapter does `storage.resolve_identity("telegram", str(update.effective_user.id))`. The HTTP/WS adapters do it via JWT `sub`. Bots never see telegram_chat_id, apple_sub, or device_id directly.
+
+### Goto vs Start
+
+- `Goto("state")` moves within the current flow; runtime invokes the new state immediately with empty input.
+- `Start("flow", nest=True)` enters a new flow; if `nest`, current flow is pushed onto `session.flow_stack` and `Done` pops back.
+
+## 6. What's NOT built (and why)
+
+| Feature | Why deferred |
+|---|---|
+| **Apple Sign-In** | Anonymous-first ships faster. Required before App Store launch. ~2 days. Tables already shaped right (`provider, external_id` are flexible). |
+| **Google Sign-In** | Same as Apple. App Store requires Apple Sign-In if any third-party login is offered. |
+| **Account linking** (`/link <code>` on Telegram → settings on iOS) | Not blocking v0; new mobile-first users don't have Telegram threads to link yet. ~50 LOC + a `link_codes` table when ready. |
+| **Push notifications (Expo Push)** | Required for Layla's "morning reading" to fire on mobile. Need: register expo_push_token endpoint, `proactive_send()` API on manifest, swap Layla's `send_daily_readings` to emit through it. ~1 day. |
+| **Voice transcription on mobile** | Layla already has it for Telegram via OpenAI Whisper. Mobile path: `expo-av` records OGG/M4A, multipart POST `/v1/voice`, server reuses existing `transcribe.py`, returns text. ~half day. |
+| **Image upload from mobile** | event-e-fire needs this (flyer images → calendar links). ~half day. |
+| **The Layla refactor itself** | This is the cross-repo work. Botella is now real and tested; the next step is to extract Layla's onboarding `ConversationHandler` (27 state IDs) into botella `Flow`s. Plan in §8. |
+| **Telegram-specific: groups, mini-apps, payments, inline mode** | Layla is DM-only and uses Telegram Stars or Stripe (deferred to post-beta). Not building these. |
+| **WebSocket reconnect with message replay** | If the WS drops mid-stream, the client misses the rest. Acceptable for v0; production may want server-side buffering keyed by message_id. |
+| **MS Bot Framework / Rasa / Stream Chat** | Evaluated and rejected. See §9. |
+
+## 7. Layla integration plan (cross-repo, NOT yet started)
+
+This is the next big body of work. Two repos run two agents in parallel:
+
+**Botella agent** (this repo): owns the `botella` package + Expo template + cross-product abstractions. Voice agent never opens this repo.
+
+**Voice agent** (in `GombiStar/`): owns prompts, personality, character voice, `claude_service.py`, `handlers/chat.py`, `personality/*.md`. Botella agent never edits these once integration is done.
+
+**The contract between them is `botella_manifest.py`** in GombiStar. ~30 lines wiring Layla's flows + handlers into a `BotManifest`.
+
+### Phase 1 — Botella agent does a one-time refactor in GombiStar
+
+Estimated 3 days. **Voice work continues in parallel** — earlier draft of this doc said "voice agent paused"; that was overcautious. Voice tweaking lives in prompt/personality territory, which is orthogonal to the structural refactor. The narrower rule is the **conflict-zone files** below.
+
+1. **Schema:** add `layla_user_identities (provider, external_id, internal_user_id UUID)` and `layla_sessions (internal_user_id PK, flow, state, data JSONB, flow_stack JSONB)`. Keep existing `layla_users.user_id BIGINT` (it's already the Telegram user ID, not chat_id — confirmed by the Explore agent dig).
+2. **Migrate** the ~10 hot DAL functions in `database/db.py` to take internal `user_id` (UUID) instead of Telegram user ID. Resolve at entry point.
+3. **Extract flows:** rewrite onboarding (state IDs 0–7), invite (20–27), add-friend (10–17) `ConversationHandler` flows into botella `Flow(...)` definitions. The 42 `context.user_data` keys move to `session.data` (JSONB). Sketch already proven in `botella/examples/layla_sketch/` against MemoryStorage.
+4. **`botella_manifest.py`:** wire flows + commands + free-chat handler.
+5. **Collapse `bot.py`:** ~3 lines invoking `create_app(manifest)`.
+6. **Switch Telegram from polling to webhook** in Northflank service config. Add `EXPOSE 8000` to Dockerfile, `CMD ["uvicorn", "bot:app", ...]`. Set Telegram webhook URL.
+7. **Verify:** existing MCP testing setup (`mcp/test_newchart_flow.py`) should still pass against the new architecture.
+
+### Conflict-zone files — voice agent should NOT edit these during the refactor window
+
+- `handlers/onboarding.py` — being deleted, replaced by Flow defs in `botella_manifest.py`
+- `handlers/invite.py` — same
+- `handlers/people.py` — same (add-friend flow)
+- `database/db.py` — DAL signatures changing from `telegram_user_id BIGINT` to internal `user_id` UUID
+- `bot.py` — collapsing from current PTB wiring to ~3 lines
+
+**Safe to keep editing in parallel:**
+- `personality/*.md` — pure prompt files, zero overlap
+- `claude_service.py` — prompt-string / function-body edits are fine; avoid changing function *signatures*
+- `locales/strings.py` — UI string audits
+- `tests/`
+
+### Phase 2 — full parallel resumes
+
+After Phase 1, the conflict zone goes away — `bot.py` is a stub, `handlers/*.py` are gone, `database/db.py` settles. Botella agent shifts to the Expo mobile shell + push + Apple Sign-In here in this repo.
+
+### Critical context for the cross-repo refactor
+
+- **Northflank deploy auto-fires on push to main.** Do refactor on a `mobile-shim` branch, merge only when tested.
+- **Northflank runtime env-var POST replaces the entire env** — if you ever update env vars via API, GET first, merge, POST the full set, or you'll wipe `OPENAI_API_KEY` etc.
+- **Layla's MCP test fixtures** (`mcp/telegram_user_mcp.py`, Telethon-based) test against the live `@laylastarbot`. Should keep working post-refactor.
+
+## 8. Repo layout
+
+```
+botella/                          ← THIS REPO
+├── pyproject.toml                  Python package config
+├── botella/                        the installable package
+│   ├── __init__.py                 public exports
+│   ├── contract.py
+│   ├── runtime.py
+│   ├── app.py
+│   ├── storage/
+│   │   └── memory.py               in-memory impl
+│   ├── auth/
+│   │   ├── jwt.py
+│   │   └── routes.py               /v1/auth/anonymous
+│   └── adapters/
+│       ├── http.py                 /v1/messages
+│       ├── ws.py                   /v1/stream
+│       └── telegram.py             PTB wrapper
+├── examples/
+│   └── echo_bot/                   toy bot exercising every primitive
+│       ├── manifest.py
+│       └── run.py
+├── tests/                          25 tests, all green
+│   ├── test_runtime.py
+│   ├── test_echo_bot_e2e.py
+│   ├── test_telegram_adapter.py
+│   └── test_ws_adapter.py
+├── scripts/
+│   ├── demo.sh                     boots backend + Expo together
+│   ├── smoke.py                    live integration check via real sockets
+│   └── monitor.py                  drives the Expo web build via Playwright
+├── mobile-template/                Expo (RN+TS) chat-shell, web target enabled
+│   ├── App.tsx
+│   ├── app.json
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── index.ts
+│   └── src/
+│       ├── config/{product,theme}.ts
+│       ├── auth/anonymous.ts
+│       ├── api/{types,stream}.ts
+│       └── chat/{ChatScreen,Bubble,Composer,QuickReplies,TypingIndicator,types}.tsx
+├── venv/                           Python 3.11 venv (gitignored)
+├── .mcp.json                       Playwright MCP config
+├── MORNING.md                      morning brief from the build session
+├── PLAYWRIGHT_MCP.md               manual MCP setup notes
+└── context.md                      THIS FILE
+```
+
+## 9. Decisions made (don't relitigate without new info)
+
+- **Build, don't buy.** Evaluated MS Bot Framework, Rasa, Botpress, Stream Chat, Vercel AI SDK, Chainlit — none fit. MS Bot Framework was closest but Python SDK is second-class and Azure pull is too heavy for solo dev. Rasa is built for NLU/intent bots, not LLM-driven free chat. Botpress is Node.js. Stream Chat is human↔human chat with bots bolted on. Build it ourselves: ~2,000 LOC of Python that fits Layla's existing shape exactly.
+- **Stay on Northflank** for Layla. Auto-deploy on push to main, Neon Postgres already wired, Docker-friendly, APScheduler runs cleanly. No host migration during the iOS port — too many things changing at once.
+- **Anonymous-first auth.** Apple Sign-In and Google Sign-In before App Store launch but not for v0.
+- **Fork-per-product, not multi-bot launcher.** User has corrected this misread before; the side-menu in mobile-template is reserved for in-app nav (settings, threads, account, paywall), NOT bot-switching.
+- **No streaming on Telegram.** Token events buffer; flush on complete or before any non-token event. Telegram's typing indicator covers the wait.
+- **No refresh tokens for v0.** 90-day JWTs are simpler; re-auth UX on expiry is acceptable.
+- **`WaitFor` takes only `next_state`.** Dropped `input_type` after a test caught the arg-order ambiguity.
+- **`quick_replies` carries its own prompt.** Don't emit `text + quick_replies` separately.
+- **Pure-streaming free chat** (`typing → token… → complete`). Don't emit a final `text(...)` after streaming — duplicates on Telegram.
+
+## 10. Commands cheat sheet
+
+```bash
+# === backend ===
+source venv/bin/activate
+python -m pytest                              # 25 tests, ~1s
+python scripts/smoke.py                       # live integration, ~1s
+uvicorn examples.echo_bot.run:app --reload    # local dev (127.0.0.1:8000)
+
+# === full stack demo (backend + Expo dev server) ===
+bash scripts/demo.sh                          # binds to 0.0.0.0 for phone access
+
+# === mobile template ===
+cd mobile-template
+npm install                                   # one-time
+npx tsc --noEmit                              # type-check (no errors = good)
+npx expo export --platform web                # static web build to dist/
+npx expo start --port 8081                    # dev server (web + Expo Go)
+
+# === web monitoring (in this session, no MCP needed) ===
+python scripts/monitor.py                     # walks canned conversation
+python scripts/monitor.py --interactive       # opens browser, leaves it
+python scripts/monitor.py --shot only         # one screenshot
+
+# === Playwright MCP (after Claude Code restart, the .mcp.json kicks in) ===
+# Tools become available as mcp__playwright__*
+# `playwright-mcp` binary is at /usr/local/bin/playwright-mcp
+
+# === Layla (separate repo) ===
+cd ~/Desktop/Coding/GombiStar
+source venv/bin/activate
+python -m pytest tests/ -v                    # Layla's existing tests (32, all passing)
+
+# === Layla deployment ===
+# Push to main → Northflank auto-deploys
+# Logs: curl -H "Authorization: Bearer $NORTHFLANK_TOKEN" \
+#         https://api.northflank.com/v1/projects/gombibot/services/laylabot/logs?lines=100
+```
+
+## 11. Known issues / gotchas
+
+### iPhone Expo Go discoverability
+
+Bonjour/mDNS auto-discovery is flaky on some networks. Three fallbacks:
+
+1. **iPhone Camera app** scans QR code at `/tmp/botella-qr.png` (regenerate with `python -c "import qrcode; qrcode.make('exp://192.168.5.81:8081').save('/tmp/botella-qr.png')"; open /tmp/botella-qr.png`)
+2. **iPhone Safari** → enter `exp://<LAN_IP>:8081` directly
+3. **Expo Go "Enter URL manually"** if it surfaces in their version
+
+User's LAN IP at last build session: `192.168.5.81`. May change.
+
+### iPhone connectivity — diagnostic order (resolved 2026-05-02)
+
+When the phone can't reach the laptop, check these in this order — this is the order that actually fired in the wild:
+
+1. **Phone on Wi-Fi at all?** First time around, phone was on cellular, not Wi-Fi. Toggle cellular off temporarily to force Wi-Fi. Easy to miss because the phone "feels" connected.
+2. **Same SSID as the laptop, exact match.** Watch for `_5G` / `_guest` variants on routers that split bands or have a guest network. Settings → Wi-Fi.
+3. **Sanity check from phone Safari**: open `http://<LAN_IP>:8081` — if Safari loads the Metro page, network is fine and the issue is app-side. If it fails, it's network.
+4. **macOS firewall** (`defaults read /Library/Preferences/com.apple.alf globalstate` — 0 = off). Was OFF in this case, so not the cause; still worth checking.
+5. **Router client isolation** — some ISP routers block phone-to-laptop traffic. Last to suspect, hard to verify without admin access.
+
+### iPhone Expo Go — entering the URL manually
+
+In Expo Go's "Enter URL manually" field, use the **`exp://`** scheme, not `http://`:
+```
+exp://<LAN_IP>:8081
+```
+`http://...:8081` makes Expo Go show "start a local development server with `npx expo start`" — that message is misleading; Metro IS running, the URL just had the wrong scheme.
+
+Phone Safari can also load `http://<LAN_IP>:8081` directly — that serves the React Native Web build of the chat shell. Useful as a fallback demo path when Expo Go is being picky.
+
+### Hermes runtime needs `react-native-get-random-values` polyfill
+
+`globalThis.crypto.getRandomValues` doesn't exist in Hermes by default — the auth flow's UUID generator (`mobile-template/src/auth/anonymous.ts`) needs it. Polyfill is imported at the top of `mobile-template/index.ts`. If you swap auth code, keep that import in place.
+
+### Northflank env-var replace footgun
+
+Per `GombiStar/context.md`: `POST /v1/projects/gombibot/services/laylabot/runtime-environment` **replaces** the entire env, doesn't merge. Always GET first when modifying.
+
+### The `useNativeDriver` warning on web
+
+Visible in browser console: `Animated: 'useNativeDriver' is not supported because the native animated module is missing`. Coming from `TypingIndicator.tsx`. Cosmetic, no impact on web. On native it uses the native driver fine. Could conditionally set `useNativeDriver: Platform.OS !== 'web'` if it ever bothers anyone.
+
+## 12. Lessons learned during the build (worth carrying forward)
+
+- **A real test caught what design-doc walkthroughs missed.** I had `WaitFor(input_type, next_state)` in my head but `WaitFor(next_state, input_type)` in the dataclass. Toy bot tests caught it on first run. Lesson: build the toy bot ALONGSIDE the contract, not after.
+- **The TokenBuffer "buffer-emptiness as flush signal" heuristic was broken.** Couldn't distinguish "just flushed" from "never had tokens." Replaced with explicit `ever_added` flag. Lesson: don't infer state from absence; track it.
+- **Multiline TextInput on web makes Enter insert a newline.** Real-world chat UX needs Enter=send, Shift+Enter=newline, with the platform check. Caught by Playwright driving the chat.
+- **Quick-replies UX foot-gun:** emitting `text("Pick one") + quick_replies(options, prompt="")` looks fine on HTTP but renders as two separate cards on Telegram (the second a useless `" "` placeholder). Use one event with `prompt="..."`.
+- **`wait -n`** isn't in macOS bash 3.2. Use a portable `kill -0` polling loop in shell scripts.
+- **Expo CLI rejects `--silent`.** Use the bare command and pipe to `tail`.
+
+## 13. Next concrete moves (priority order)
+
+1. **Verify Playwright MCP works** after Claude Code restart. Test: ask the new agent to take a screenshot of the chat at `localhost:8081`.
+2. **Diagnose the iPhone connectivity issue** (firewall most likely). Web demo is the fallback that's confirmed working.
+3. **Sketch the Layla refactor in this repo** — extract Layla's onboarding states into a botella `Flow` against MemoryStorage, prove the abstraction holds for the real complexity, BEFORE touching GombiStar's actual code. ~3 hours.
+4. **Cross-repo handoff PR to GombiStar** (Phase 1 of §7). ~3 days, voice agent paused.
+5. **Push notifications (Expo Push)** so Layla's morning readings can fire on mobile. ~1 day.
+6. **Apple Sign-In + account linking** before App Store submission.
+
+## 14. References
+
+- `MORNING.md` — what was working at the end of the build session (slightly outdated since we added monitor.py + iPhone setup after)
+- `PLAYWRIGHT_MCP.md` — manual MCP setup notes
+- `~/Desktop/Coding/GombiStar/context.md` — Layla's full product + tech context
+- `~/Desktop/Coding/event-e-fire/context.md` — second bot we'll port later
+- `~/.claude/projects/-Users-barakben-ezer-Desktop-Coding-botella/memory/MEMORY.md` — auto-memory index (loaded automatically)
+
+## 15. Auto-memory awareness
+
+The user's `MEMORY.md` (auto-loaded) already includes:
+
+- **User profile** — solo builder, multi-bot, product-first/PM-style
+- **Project portfolio** — Layla, event-e-fire, Gombi, GombiStar live; botella is the new Expo+FastAPI scaffold
+- **Botella iOS app scaffold** — the chat-oriented template, fork-per-product, scaffold not launcher
+- **Scaffold-not-launcher feedback** — explicit correction: "deploy my bots into an app" means fork-the-template-per-product, NOT one app hosting many bots
+
+Don't relitigate any of those. They're settled.
+
+---
+
+**End of handoff.** A fresh agent reading this should be able to pick up immediately. If something's missing, update this file as you go.

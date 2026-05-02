@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Virtualenv
+venv/
+.venv/
+env/
+
+# Node / Expo / RN
+node_modules/
+.expo/
+.expo-shared/
+dist/
+*.log
+.metro-health-check*
+
+# Bun (in case)
+bun.lockb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Local secrets
+.env
+.env.local
+
+# Build artifacts
+*.ipa
+*.apk
+*.aab
+
+# Playwright MCP scratch
+.playwright-mcp/
+/*.png
+
+# Local testing scratch
+/tmp/

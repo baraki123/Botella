@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "playwright-mcp",
+      "args": [],
+      "description": "Drive a Chromium browser to visually test the Expo web build (http://localhost:8081). Use to take screenshots, click chips, type into the composer, watch console + network. Same capability as scripts/monitor.py, just exposed as MCP tools."
+    }
+  }
+}
