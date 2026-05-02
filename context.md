@@ -1,6 +1,6 @@
 # botella — context
 
-> **Handoff doc.** A fresh Claude session can read this top-to-bottom and pick up the work cold. Last updated 2026-05-01, end of session that built v0.0.1.
+> **Handoff doc.** A fresh Claude session can read this top-to-bottom and pick up the work cold. Last updated 2026-05-02 overnight, end of the App Store launch-plan session. **READ `LAUNCH_PLAN.md` FIRST** if a session began with that as context — it has the wake-up brief and recent progress log.
 
 ---
 
@@ -211,22 +211,25 @@ After Phase 1, the conflict zone goes away — `bot.py` is a stub, `handlers/*.p
 ## 8. Repo layout
 
 ```
-botella/                          ← THIS REPO
+botella/                          ← THIS REPO (now git-tracked, branch `main`, never pushed)
 ├── pyproject.toml                  Python package config
+├── LAUNCH_PLAN.md                  ★ App Store launch tracker — read first if relevant
 ├── botella/                        the installable package
 │   ├── __init__.py                 public exports
-│   ├── contract.py
+│   ├── contract.py                 (incl. Storage.delete_user)
 │   ├── runtime.py
-│   ├── app.py
+│   ├── app.py                      mounts auth + account + push + http + ws
+│   ├── push.py                     POST /v1/push/register + proactive_send()
 │   ├── storage/
-│   │   └── memory.py               in-memory impl
+│   │   └── memory.py               in-memory impl (with telegram_id_for + delete_user)
 │   ├── auth/
 │   │   ├── jwt.py
-│   │   └── routes.py               /v1/auth/anonymous
+│   │   ├── apple.py                Apple Sign-In identity-token verifier
+│   │   └── routes.py               /v1/auth/{anonymous,apple} + /v1/account
 │   └── adapters/
 │       ├── http.py                 /v1/messages
 │       ├── ws.py                   /v1/stream
-│       └── telegram.py             PTB wrapper
+│       └── telegram.py             PTB wrapper (HTML parse_mode, lifespan-safe)
 ├── examples/
 │   └── echo_bot/                   toy bot exercising every primitive
 │       ├── manifest.py
@@ -240,17 +243,30 @@ botella/                          ← THIS REPO
 │   ├── demo.sh                     boots backend + Expo together
 │   ├── smoke.py                    live integration check via real sockets
 │   └── monitor.py                  drives the Expo web build via Playwright
-├── mobile-template/                Expo (RN+TS) chat-shell, web target enabled
-│   ├── App.tsx
-│   ├── app.json
+├── mobile-template/                Generic Expo (RN+TS) chat-shell, the canonical
+│   │                               template. Apple Sign-In capable.
+│   ├── App.tsx                     signin → chat routing
+│   ├── app.json                    Echo template (slug "mobile-template")
 │   ├── package.json
 │   ├── tsconfig.json
-│   ├── index.ts
+│   ├── index.ts                    react-native-get-random-values polyfill
 │   └── src/
 │       ├── config/{product,theme}.ts
-│       ├── auth/anonymous.ts
+│       ├── auth/{anonymous,apple,SignInScreen}.tsx
 │       ├── api/{types,stream}.ts
 │       └── chat/{ChatScreen,Bubble,Composer,QuickReplies,TypingIndicator,types}.tsx
+├── layla-app/                      First product fork. Layla branding, dusk purple,
+│   │                               app.layla.ios bundle id, eas.json for builds.
+│   ├── App.tsx                     signin → chat ↔ settings routing
+│   ├── app.json                    name "Layla", bundle id, splash, infoPlist,
+│   │                               usesAppleSignIn, expo-apple-authentication plugin
+│   ├── eas.json                    development / preview / production profiles
+│   ├── package.json                "layla-app"
+│   └── src/
+│       ├── config/{product,theme}.ts  Layla strings + dusk purple
+│       ├── auth/                   inherited from mobile-template (anonymous, apple, SignIn)
+│       ├── chat/                   inherited; ChatScreen has ⋯ Settings button
+│       └── settings/SettingsScreen.tsx  account / signout / delete / privacy / terms
 ├── venv/                           Python 3.11 venv (gitignored)
 ├── .mcp.json                       Playwright MCP config
 ├── MORNING.md                      morning brief from the build session
@@ -362,18 +378,33 @@ Visible in browser console: `Animated: 'useNativeDriver' is not supported becaus
 - **`wait -n`** isn't in macOS bash 3.2. Use a portable `kill -0` polling loop in shell scripts.
 - **Expo CLI rejects `--silent`.** Use the bare command and pipe to `tail`.
 
-## 13. Next concrete moves (priority order)
+## 13. Next concrete moves (priority order — UPDATED 2026-05-02 overnight)
 
-1. **Verify Playwright MCP works** after Claude Code restart. Test: ask the new agent to take a screenshot of the chat at `localhost:8081`.
-2. **Diagnose the iPhone connectivity issue** (firewall most likely). Web demo is the fallback that's confirmed working.
-3. **Sketch the Layla refactor in this repo** — extract Layla's onboarding states into a botella `Flow` against MemoryStorage, prove the abstraction holds for the real complexity, BEFORE touching GombiStar's actual code. ~3 hours.
-4. **Cross-repo handoff PR to GombiStar** (Phase 1 of §7). ~3 days, voice agent paused.
-5. **Push notifications (Expo Push)** so Layla's morning readings can fire on mobile. ~1 day.
-6. **Apple Sign-In + account linking** before App Store submission.
+Most of the original list is done. Current state:
+
+DONE in the overnight session:
+- ✅ Playwright MCP confirmed working
+- ✅ iPhone connectivity diagnosed (cellular vs Wi-Fi, polyfill missing)
+- ✅ Layla onboarding sketch (`examples/layla_sketch/`)
+- ✅ Phase 1 of GombiStar refactor — schema, Storage, onboarding Flow, manifest, parallel `bot_botella.py` (NOT cut over to production)
+- ✅ Apple Sign-In server + mobile (B1, B2)
+- ✅ Account-delete (B6) — App Store-required
+- ✅ Push notification scaffold (B4)
+- ✅ Layla-branded mobile fork (`layla-app/`)
+
+OPEN — what a future session should pick up:
+
+1. **Cut over Layla to botella in production.** The plumbing is done; this is the deploy decision. Preferred path: deploy `bot_botella.py` to a staging Northflank service (`laylabot-staging`), point a TestFlight build at it, validate, then swap `laylabot`. Run the schema migration backfill (`INSERT INTO layla_user_identities …` from `database/schema.sql` comments) at the same time as cutover.
+2. **Port the rest of the GombiStar handlers.** The pattern is set in `flows/onboarding.py`. Next: `flows/invite.py` (states 20–27), `flows/people.py` (states 10–17), `flows/intake.py` (state 30), and a `flows/settings.py` for the in-chat settings city flow. The chat handler's regex detection layers (invite intent, name recognition, update-notes) should move into a free_chat wrapper.
+3. **App Store submission prep.** See LAUNCH_PLAN.md Phase D — Apple Developer account, App Store Connect record, EAS Build, privacy policy hosting, screenshots, marketing copy, age rating.
+4. **Voice messages on mobile (B5).** Server-side `voice_handler` is ready. Mobile: `expo-av` recorder UI, multipart `POST /v1/voice` with audio bytes, server reuses `services.transcribe.transcribe_audio`. ~half day.
+5. **Account linking endpoint (B3 full).** Existing Telegram users → iOS app: `/link <code>` on Telegram generates a code, iOS Settings has "I already use Layla on Telegram" path that takes the code. ~1 day with UX polish.
+6. **save_natal_chart orphan-row fix (A9).** Known data hygiene; not user-visible. Add partial unique index on `layla_natal_charts(user_id)` or DELETE-before-INSERT in the /newchart path.
 
 ## 14. References
 
-- `MORNING.md` — what was working at the end of the build session (slightly outdated since we added monitor.py + iPhone setup after)
+- `LAUNCH_PLAN.md` — App Store launch tracker with the overnight wake-up brief at the top.
+- `MORNING.md` — what was working at the end of the original build session (substantially outdated; LAUNCH_PLAN.md supersedes).
 - `PLAYWRIGHT_MCP.md` — manual MCP setup notes
 - `~/Desktop/Coding/GombiStar/context.md` — Layla's full product + tech context
 - `~/Desktop/Coding/event-e-fire/context.md` — second bot we'll port later
