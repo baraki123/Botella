@@ -194,32 +194,32 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{product.name}</Text>
-        <View style={styles.statusRow}>
+        <View style={styles.headerLeft}>
           <View
             style={[
               styles.statusDot,
               {
                 backgroundColor:
                   status === "open"
-                    ? "#22C55E"
+                    ? theme.statusOpen
                     : status === "connecting"
-                      ? "#F59E0B"
-                      : "#EF4444",
+                      ? theme.statusConnecting
+                      : theme.statusClosed,
               },
             ]}
           />
-          <Text style={styles.statusText}>{status}</Text>
-          {onOpenSettings ? (
-            <Pressable
-              onPress={onOpenSettings}
-              style={({ pressed }) => [styles.settingsBtn, pressed && { opacity: 0.5 }]}
-              accessibilityLabel="Settings"
-            >
-              <Text style={styles.settingsIcon}>⋯</Text>
-            </Pressable>
-          ) : null}
+          <Text style={styles.headerTitle}>{product.name}</Text>
         </View>
+        {onOpenSettings ? (
+          <Pressable
+            onPress={onOpenSettings}
+            style={({ pressed }) => [styles.settingsBtn, pressed && { opacity: 0.5 }]}
+            accessibilityLabel="Settings"
+            hitSlop={10}
+          >
+            <Text style={styles.settingsIcon}>⋯</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <FlatList
@@ -260,28 +260,27 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: theme.spacing,
-    paddingTop: 14,
-    paddingBottom: 10,
+    paddingHorizontal: theme.spacing + 6,
+    paddingTop: 16,
+    paddingBottom: 14,
     backgroundColor: theme.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.border,
   },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontSize: 22,
     color: theme.text,
+    fontFamily: theme.fontSerifItalic,
+    letterSpacing: 0.5,
   },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   settingsBtn: {
-    marginLeft: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 14,
   },
-  settingsIcon: { fontSize: 22, color: theme.textSubtle, lineHeight: 22 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { color: theme.textSubtle, fontSize: 13 },
+  settingsIcon: { fontSize: 24, color: theme.textSubtle, lineHeight: 24 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
   list: { flex: 1 },
   listContent: { paddingVertical: 12 },
   errorTitle: { fontSize: 18, fontWeight: "600", color: theme.text, marginBottom: 8 },

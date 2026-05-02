@@ -3,26 +3,28 @@ import { Animated, StyleSheet, View } from "react-native";
 
 import { theme } from "../config/theme";
 
+/**
+ * Slow-pulsing trio of gold dots, no bubble — matches Layla's bubble-less
+ * message style. Slower than typical chat dots; she's thinking, not typing.
+ */
 export function TypingIndicator() {
   return (
     <View style={styles.row}>
-      <View style={styles.bubble}>
-        <Dot delay={0} />
-        <Dot delay={150} />
-        <Dot delay={300} />
-      </View>
+      <Dot delay={0} />
+      <Dot delay={280} />
+      <Dot delay={560} />
     </View>
   );
 }
 
 function Dot({ delay }: { delay: number }) {
-  const opacity = useRef(new Animated.Value(0.3)).current;
+  const opacity = useRef(new Animated.Value(0.25)).current;
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
         Animated.delay(delay),
-        Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.3, duration: 400, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.85, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.25, duration: 700, useNativeDriver: true }),
       ]),
     );
     loop.start();
@@ -34,22 +36,15 @@ function Dot({ delay }: { delay: number }) {
 const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
-    paddingHorizontal: theme.spacing,
-    marginVertical: 4,
-  },
-  bubble: {
-    flexDirection: "row",
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: theme.radius,
-    borderBottomLeftRadius: 4,
-    backgroundColor: theme.bubbleBot,
-    gap: 4,
+    alignItems: "center",
+    paddingHorizontal: theme.spacing + 6,
+    marginVertical: 10,
+    gap: 7,
   },
   dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: theme.textSubtle,
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: theme.accent,
   },
 });

@@ -18,7 +18,7 @@ export function QuickReplies({ options, onPick }: Props) {
           onPress={() => onPick(opt)}
           style={({ pressed }) => [
             styles.chip,
-            pressed && { opacity: 0.7 },
+            pressed && styles.chipPressed,
           ]}
         >
           <Text style={styles.chipText}>{opt}</Text>
@@ -32,22 +32,28 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     flexWrap: "wrap",
-    paddingHorizontal: theme.spacing,
-    paddingTop: 4,
-    paddingBottom: 8,
+    paddingLeft: theme.spacing + 6 + 17, // align with Layla's text (after the gold dot)
+    paddingRight: theme.spacing + 6,
+    paddingTop: 2,
+    paddingBottom: 12,
     gap: 8,
   },
   chip: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 16,
     borderRadius: 999,
     backgroundColor: theme.chip,
     borderWidth: 1,
     borderColor: theme.chipBorder,
   },
+  chipPressed: {
+    backgroundColor: theme.surfaceRaised,
+    borderColor: theme.accent,
+  },
   chipText: {
     color: theme.chipText,
-    fontSize: 15,
-    fontWeight: "500",
+    fontSize: 14,
+    fontWeight: "500" as const,
+    letterSpacing: 0.2,
   },
 });

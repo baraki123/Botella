@@ -1,15 +1,11 @@
 /**
  * Pre-chat sign-in screen.
  *
- * App Store policy (4.8 Sign In with Apple): if the app uses any third-party
- * sign-in (Google/Facebook/etc), Apple Sign-In must also be offered. This
- * project starts with Apple-or-anonymous, which satisfies the policy
- * trivially. Adding Google later means adding Apple stays first.
- *
- * Design: this screen is intentionally bare. The hero is the product name
- * + a short tagline; the buttons are the only chrome. Apple's HIG requires
- * the AppleAuthenticationButton component on iOS — it handles dark mode,
- * RTL, and is the only blessed way to brand "Sign in with Apple."
+ * Visual: dark twilight canvas. Large italic-serif "Layla" mark, then a
+ * single line of her voice as a tagline. Two ways in — Apple (iOS only)
+ * and a quiet "stay anonymous" text link beneath. App Store policy 4.8
+ * is satisfied trivially: Apple is the only third-party sign-in shown,
+ * and it's primary.
  */
 import * as AppleAuthentication from "expo-apple-authentication";
 import React, { useEffect, useState } from "react";
@@ -47,10 +43,8 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
       const session = await signInWithApple({});
       onSignedIn(session);
     } catch (e: any) {
-      // Apple's user-cancel error is well-known; don't show it.
-      const code = e?.code;
-      if (code === "ERR_REQUEST_CANCELED") {
-        // Cancelled — silent.
+      if (e?.code === "ERR_REQUEST_CANCELED") {
+        // Apple's user-cancel — silent.
       } else {
         setError(e?.message ?? String(e));
       }
@@ -76,6 +70,7 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
     <View style={styles.root}>
       <View style={styles.hero}>
         <Text style={styles.title}>{product.name}</Text>
+        <View style={styles.divider} />
         <Text style={styles.tag}>{product.greeting}</Text>
       </View>
 
@@ -86,9 +81,9 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
               AppleAuthentication.AppleAuthenticationButtonType.CONTINUE
             }
             buttonStyle={
-              AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+              AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE
             }
-            cornerRadius={theme.radius}
+            cornerRadius={12}
             style={styles.appleBtn}
             onPress={tryApple}
           />
@@ -103,9 +98,11 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
           ]}
         >
           {busy === "anonymous" ? (
-            <ActivityIndicator />
+            <ActivityIndicator color={theme.accent} />
           ) : (
-            <Text style={styles.skipLabel}>Continue without an account</Text>
+            <Text style={styles.skipLabel}>
+              {appleAvailable ? "Just open the door" : "Begin"}
+            </Text>
           )}
         </Pressable>
 
@@ -113,10 +110,15 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
 
         {Platform.OS !== "ios" && !appleAvailable ? (
           <Text style={styles.note}>
-            Sign in with Apple is iOS-only. On this device you'll start
-            anonymously; you can link an Apple account later from Settings.
+            Sign in with Apple is iOS only. You'll start anonymously here —
+            we'll keep what you tell us, and you can attach an Apple account
+            later.
           </Text>
         ) : null}
+
+        <Text style={styles.privacy}>
+          Everything you share with Layla is private to you.
+        </Text>
       </View>
     </View>
   );
@@ -126,45 +128,60 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.bg,
-    paddingHorizontal: 24,
-    paddingVertical: 36,
+    paddingHorizontal: 28,
+    paddingVertical: 48,
     justifyContent: "space-between",
   },
-  hero: { marginTop: 64 },
+  hero: { marginTop: 72, alignItems: "flex-start" },
   title: {
-    fontSize: 36,
-    fontWeight: "600" as const,
+    fontSize: 72,
+    fontFamily: theme.fontSerifItalic,
     color: theme.text,
-    marginBottom: theme.spacing,
+    marginBottom: 18,
+    letterSpacing: 0.5,
+  },
+  divider: {
+    width: 36,
+    height: 1.5,
+    backgroundColor: theme.accent,
+    marginBottom: 22,
+    opacity: 0.7,
   },
   tag: {
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 17,
+    lineHeight: 26,
     color: theme.textSubtle,
+    maxWidth: 380,
   },
-  actions: { gap: theme.spacing, marginBottom: 36 },
+  actions: { gap: 18, marginBottom: 16 },
   appleBtn: { width: "100%", height: 48 },
   skip: {
     alignItems: "center",
-    paddingVertical: theme.spacing,
-    borderRadius: theme.radius,
-    borderWidth: 1,
-    borderColor: theme.border,
+    paddingVertical: 14,
   },
-  skipPressed: { opacity: 0.6 },
+  skipPressed: { opacity: 0.5 },
   skipLabel: {
     fontSize: 15,
-    color: theme.text,
+    color: theme.accent,
+    letterSpacing: 0.6,
   },
   error: {
-    color: "#B91C1C",
+    color: "#C97777",
     fontSize: 13,
     textAlign: "center",
   },
   note: {
-    color: theme.textSubtle,
+    color: theme.textMuted,
     fontSize: 12,
     textAlign: "center",
-    lineHeight: 16,
+    lineHeight: 17,
+  },
+  privacy: {
+    color: theme.textMuted,
+    fontSize: 12,
+    textAlign: "center",
+    fontFamily: theme.fontSerifItalic,
+    letterSpacing: 0.3,
+    marginTop: 8,
   },
 });

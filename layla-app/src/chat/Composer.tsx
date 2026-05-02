@@ -17,11 +17,11 @@ interface Props {
 
 export function Composer({ onSend, disabled }: Props) {
   const [value, setValue] = useState("");
+  const ready = !!value.trim() && !disabled;
 
   const submit = () => {
-    const trimmed = value.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
+    if (!ready) return;
+    onSend(value.trim());
     setValue("");
   };
 
@@ -35,15 +35,14 @@ export function Composer({ onSend, disabled }: Props) {
           style={styles.input}
           value={value}
           onChangeText={setValue}
-          placeholder="Message"
-          placeholderTextColor={theme.textSubtle}
+          placeholder="Tell Layla…"
+          placeholderTextColor={theme.textMuted}
           onSubmitEditing={submit}
           returnKeyType="send"
           editable={!disabled}
           blurOnSubmit={false}
           multiline
-          // Web: with multiline, Enter normally inserts a newline. For a chat
-          // composer the standard UX is Enter=send, Shift+Enter=newline.
+          // Web: Enter sends, Shift+Enter newlines.
           onKeyPress={
             Platform.OS === "web"
               ? (e: any) => {
@@ -60,25 +59,29 @@ export function Composer({ onSend, disabled }: Props) {
           accessibilityRole="button"
           accessibilityLabel="send"
           onPress={submit}
-          disabled={!value.trim() || disabled}
+          disabled={!ready}
           style={({ pressed }) => [
             styles.send,
-            (!value.trim() || disabled) && { opacity: 0.4 },
-            pressed && { opacity: 0.7 },
+            !ready && styles.sendDim,
+            pressed && ready && styles.sendPressed,
           ]}
         >
-          <SendIcon />
+          <SendIcon active={ready} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-function SendIcon() {
-  // Simple unicode arrow keeps the template font-free.
+function SendIcon({ active }: { active: boolean }) {
   return (
     <View style={styles.iconWrap}>
-      <View style={styles.iconArrow} />
+      <View
+        style={[
+          styles.iconArrow,
+          { borderLeftColor: active ? theme.bg : theme.textMuted },
+        ]}
+      />
     </View>
   );
 }
@@ -87,29 +90,39 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: "row",
     alignItems: "flex-end",
-    padding: 8,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 12,
     backgroundColor: theme.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.border,
-    gap: 8,
+    gap: 10,
   },
   input: {
     flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
     backgroundColor: theme.bg,
+    borderWidth: 1,
+    borderColor: theme.border,
     borderRadius: 22,
     fontSize: 16,
     color: theme.text,
-    maxHeight: 120,
+    maxHeight: 140,
   },
   send: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: theme.accent,
     alignItems: "center",
     justifyContent: "center",
+  },
+  sendDim: {
+    backgroundColor: theme.surfaceRaised,
+  },
+  sendPressed: {
+    backgroundColor: theme.accentDim,
   },
   iconWrap: { width: 18, height: 18, alignItems: "center", justifyContent: "center" },
   iconArrow: {
@@ -119,7 +132,6 @@ const styles = StyleSheet.create({
     borderRightWidth: 0,
     borderTopWidth: 6,
     borderBottomWidth: 6,
-    borderLeftColor: "#FFFFFF",
     borderTopColor: "transparent",
     borderBottomColor: "transparent",
     transform: [{ translateX: -2 }],

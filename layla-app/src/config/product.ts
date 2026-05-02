@@ -38,7 +38,7 @@ export const product = {
   greeting:
     "I'm Layla. Tell me when you were born and I'll see what I see — then bring me whatever's actually on your mind.",
   apiUrl: isProd ? PRODUCTION_API_URL : `http://${apiHost}:8000`,
-  accent: "#9B7BD8", // dusk purple — placeholder until brand color is locked
+  accent: "#D4A574", // warm gold — used for Layla's signature touches
 } as const;
 
 export type Product = typeof product;

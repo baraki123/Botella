@@ -8,30 +8,37 @@ interface Props {
   message: Message;
 }
 
+/**
+ * Layla messages: no bubble. Just her words on the dark canvas, prefixed
+ * by a small gold dot — she feels ambient, present, like she's whispering
+ * across the table rather than replying from a chat box.
+ *
+ * User messages: a quiet charcoal-rose pill so the conversation has
+ * rhythm and you can scan your own thread.
+ */
 export function Bubble({ message }: Props) {
   const isUser = message.role === "user";
+  const text = stripHtml(message.text);
+
+  if (isUser) {
+    return (
+      <View style={[styles.row, styles.rowUser]}>
+        <View style={styles.userBubble}>
+          <Text style={styles.userText}>
+            {text}
+            {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
-    <View
-      style={[
-        styles.row,
-        { justifyContent: isUser ? "flex-end" : "flex-start" },
-      ]}
-    >
-      <View
-        style={[
-          styles.bubble,
-          isUser ? styles.bubbleUser : styles.bubbleBot,
-          isUser
-            ? { borderBottomRightRadius: 4 }
-            : { borderBottomLeftRadius: 4 },
-        ]}
-      >
-        <Text
-          style={isUser ? styles.textUser : styles.textBot}
-          // The server sometimes emits HTML (<b>, <i>) for Telegram parity.
-          // For a v0 demo we strip HTML to keep things readable on mobile.
-        >
-          {stripHtml(message.text)}
+    <View style={styles.row}>
+      <View style={styles.botRow}>
+        <View style={styles.botDot} />
+        <Text style={styles.botText}>
+          {text}
           {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
         </Text>
       </View>
@@ -45,19 +52,45 @@ function stripHtml(s: string): string {
 
 const styles = StyleSheet.create({
   row: {
-    flexDirection: "row",
-    paddingHorizontal: theme.spacing,
-    marginVertical: 4,
+    paddingHorizontal: theme.spacing + 6,
+    marginVertical: 8,
   },
-  bubble: {
-    maxWidth: "85%",
-    paddingVertical: 10,
+  rowUser: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  userBubble: {
+    maxWidth: "80%",
+    paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: theme.radius,
+    borderBottomRightRadius: 6,
+    backgroundColor: theme.bubbleUser,
   },
-  bubbleUser: { backgroundColor: theme.bubbleUser },
-  bubbleBot: { backgroundColor: theme.bubbleBot },
-  textUser: { color: theme.bubbleUserText, fontSize: 16, lineHeight: 22 },
-  textBot: { color: theme.bubbleBotText, fontSize: 16, lineHeight: 22 },
-  caret: { opacity: 0.5 },
+  userText: {
+    color: theme.bubbleUserText,
+    fontSize: 16,
+    lineHeight: 23,
+  },
+  botRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingRight: 28,
+  },
+  botDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: theme.accent,
+    marginTop: 11, // visual-align with first line of text
+  },
+  botText: {
+    flex: 1,
+    color: theme.bubbleBotText,
+    fontSize: 17,
+    lineHeight: 26,
+    letterSpacing: 0.1,
+  },
+  caret: { opacity: 0.5, color: theme.accent },
 });

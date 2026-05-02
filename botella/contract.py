@@ -136,10 +136,18 @@ class Done:
 
 @dataclass
 class Start:
-    """Enter a flow. If `nest=True`, push the current flow onto the stack."""
+    """Enter a flow. If `nest=True`, push the current flow onto the stack.
+
+    `init_data` lets a trigger seed the new flow's session.data with
+    context from the inbound message (e.g. an invite token, a deep-link
+    payload). Without it, the runtime resets session.data to `{}` when
+    a flow starts, which is correct when entering fresh but loses any
+    fields the trigger pre-stashed.
+    """
     flow: str
     state: str | None = None  # default: flow's entry state
     nest: bool = False
+    init_data: dict[str, Any] = field(default_factory=dict)
 
 
 Transition = Union[WaitFor, Stay, Goto, Done, Start, None]

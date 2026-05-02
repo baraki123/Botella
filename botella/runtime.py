@@ -149,7 +149,7 @@ async def _follow(
             )
         session.flow = flow.name
         session.state = entry
-        session.data = {}
+        session.data = dict(transition.init_data) if transition.init_data else {}
         async for e in _run_state(entry, session, manifest, storage, msg):
             yield e
         return
