@@ -31,13 +31,15 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const [session, setSession] = useState<Session | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
-  const [messages, setMessages] = useState<Message[]>([
-    { id: "greeting", role: "bot", text: product.greeting },
-  ]);
+  // Chat starts EMPTY. Layla begins talking on her own when the WS opens —
+  // see the auto-/start effect below. The greeting on SignInScreen is the
+  // before-the-door pitch; once you're in, Layla addresses you directly.
+  const [messages, setMessages] = useState<Message[]>([]);
   const [showTyping, setShowTyping] = useState(false);
   const streamRef = useRef<StreamClient | null>(null);
   const streamingIdRef = useRef<string | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
+  const startedRef = useRef(false);
 
   // 1. Bootstrap session.
   useEffect(() => {
@@ -61,7 +63,17 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  // 3. Auto-scroll on every message change.
+  // 3. Auto-/start on first WS open. The server's /start trigger checks for
+  // an existing chart and either re-enters onboarding (new user) or sends
+  // a "welcome back" line (returning user) — safe in both cases. Gated by
+  // startedRef so we don't fire it again on reconnects within the session.
+  useEffect(() => {
+    if (status !== "open" || startedRef.current) return;
+    startedRef.current = true;
+    streamRef.current?.send({ text: "/start" });
+  }, [status]);
+
+  // 4. Auto-scroll on every message change.
   useEffect(() => {
     listRef.current?.scrollToEnd({ animated: true });
   }, [messages, showTyping]);
