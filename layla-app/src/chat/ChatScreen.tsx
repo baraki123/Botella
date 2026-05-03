@@ -156,9 +156,11 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   }
 
   function send(text: string) {
-    if (!streamRef.current) return;
+    // Always render the user's message immediately. The StreamClient queues
+    // the wire-send if the WS isn't open and flushes on reconnect, so the
+    // user never has to wonder whether their message went through.
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
-    streamRef.current.send({ text });
+    streamRef.current?.send({ text });
   }
 
   function pickQuickReply(option: string, fromMessageId: string) {
@@ -242,7 +244,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
         ListFooterComponent={showTyping ? <TypingIndicator /> : null}
       />
 
-      <Composer onSend={send} disabled={status !== "open"} />
+      <Composer onSend={send} status={status} />
     </View>
   );
 }

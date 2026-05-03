@@ -4,6 +4,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from "react-native";
@@ -12,12 +13,14 @@ import { theme } from "../config/theme";
 
 interface Props {
   onSend: (text: string) => void;
-  disabled?: boolean;
+  /** Connection status — for a small visual cue, NOT for blocking input.
+   * Messages typed while not "open" are queued and flushed on reconnect. */
+  status?: "open" | "connecting" | "closed";
 }
 
-export function Composer({ onSend, disabled }: Props) {
+export function Composer({ onSend, status = "open" }: Props) {
   const [value, setValue] = useState("");
-  const ready = !!value.trim() && !disabled;
+  const ready = !!value.trim();
 
   const submit = () => {
     if (!ready) return;
@@ -30,6 +33,16 @@ export function Composer({ onSend, disabled }: Props) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={0}
     >
+      {status !== "open" ? (
+        <View style={styles.statusBanner}>
+          <View style={styles.statusBannerDot} />
+          <Text style={styles.statusBannerText}>
+            {status === "connecting"
+              ? "Reconnecting — keep typing, your messages will send."
+              : "Offline. Your messages will send when we're back."}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.bar}>
         <TextInput
           style={styles.input}
@@ -39,7 +52,7 @@ export function Composer({ onSend, disabled }: Props) {
           placeholderTextColor={theme.textMuted}
           onSubmitEditing={submit}
           returnKeyType="send"
-          editable={!disabled}
+          editable={true}
           blurOnSubmit={false}
           multiline
           // Web: Enter sends, Shift+Enter newlines.
@@ -135,5 +148,27 @@ const styles = StyleSheet.create({
     borderTopColor: "transparent",
     borderBottomColor: "transparent",
     transform: [{ translateX: -2 }],
+  },
+  statusBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: theme.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.border,
+  },
+  statusBannerDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.statusConnecting,
+  },
+  statusBannerText: {
+    flex: 1,
+    color: theme.textSubtle,
+    fontSize: 12,
+    letterSpacing: 0.2,
   },
 });

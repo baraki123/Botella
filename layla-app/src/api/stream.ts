@@ -29,9 +29,19 @@ export function connectStream(jwt: string): StreamClient {
   let ws: WebSocket | null = null;
   let closed = false;
   let backoff = 500;
+  // Messages typed while WS is connecting / dropped — flushed when it opens.
+  const outbox: Array<{ text?: string; callback_data?: string }> = [];
 
   const emitStatus = (s: "connecting" | "open" | "closed") => {
     for (const fn of statusListeners) fn(s);
+  };
+
+  const flushOutbox = () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    while (outbox.length) {
+      const m = outbox.shift()!;
+      ws.send(JSON.stringify({ transport: "ios", ...m }));
+    }
   };
 
   const open = () => {
@@ -41,6 +51,7 @@ export function connectStream(jwt: string): StreamClient {
     ws.onopen = () => {
       backoff = 500;
       emitStatus("open");
+      flushOutbox();
     };
     ws.onmessage = (evt) => {
       try {
@@ -65,11 +76,14 @@ export function connectStream(jwt: string): StreamClient {
 
   return {
     send(message) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn("ws not open; dropping message");
-        return;
+      // Always accept the message. If the socket is up, send now; otherwise
+      // queue it and flush on the next 'open'. Avoids the silent-failure
+      // mode where typing while reconnecting drops user messages.
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ transport: "ios", ...message }));
+      } else {
+        outbox.push(message);
       }
-      ws.send(JSON.stringify({ transport: "ios", ...message }));
     },
     close() {
       closed = true;
