@@ -1,7 +1,11 @@
 # Layla iOS App Store launch plan
 
-**Started:** 2026-05-02 evening · **Mode:** autonomous overnight session
-**Last updated:** 2026-05-02 ~early AM, end of session
+**Started:** 2026-05-02 evening · **Last updated:** 2026-05-03 mid-day
+
+> **Note:** for the latest state, read `~/Desktop/Coding/botella/context.md` §0
+> first. This file is the night-of-2026-05-02 progress log; everything below
+> is historical. The day-2026-05-03 work (flows ported, design pass, real
+> Layla brain running locally, all the bug fixes) is captured in context.md.
 
 ---
 
