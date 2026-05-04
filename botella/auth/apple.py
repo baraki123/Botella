@@ -48,24 +48,29 @@ def _default_jwk_client() -> PyJWKClient:
     return _jwk_client
 
 
-def _audience() -> str:
-    """The expected `aud` claim — your iOS app's Bundle ID.
+def _audience() -> list[str]:
+    """The accepted `aud` claims — your iOS app's Bundle ID(s).
 
-    For a Layla iOS build the bundle id will be e.g. `app.layla.ios`.
+    For a real Layla build the bundle id is `app.layla.ios`. During Expo Go
+    development the bundle id Apple sees is `host.exp.Exponent`, so we
+    accept a comma-separated list and pyjwt happily matches any of them.
     Configured via env so tests + multiple products can override.
     """
-    aud = os.environ.get("APPLE_SIGN_IN_AUDIENCE")
-    if not aud:
+    raw = os.environ.get("APPLE_SIGN_IN_AUDIENCE")
+    if not raw:
         raise AppleAuthError(
             "APPLE_SIGN_IN_AUDIENCE env var is required (the iOS Bundle ID)"
         )
-    return aud
+    auds = [a.strip() for a in raw.split(",") if a.strip()]
+    if not auds:
+        raise AppleAuthError("APPLE_SIGN_IN_AUDIENCE must contain at least one value")
+    return auds
 
 
 def verify_apple_identity_token(
     token: str,
     *,
-    audience: str | None = None,
+    audience: str | list[str] | None = None,
     jwk_client: PyJWKClient | None = None,
     expected_nonce: str | None = None,
     leeway_seconds: int = 60,
@@ -81,7 +86,10 @@ def verify_apple_identity_token(
 
     `jwk_client` is injectable for tests.
     """
-    aud = audience if audience is not None else _audience()
+    if audience is None:
+        aud: str | list[str] = _audience()
+    else:
+        aud = audience
     client = jwk_client or _default_jwk_client()
 
     # PyJWKClient.get_signing_key_from_jwt(token) parses the unverified header
