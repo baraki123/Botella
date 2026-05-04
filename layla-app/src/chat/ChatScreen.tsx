@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -273,36 +275,47 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       <Glow corner="top-left" intensity={0.18} />
       <Starfield />
 
-      <ChatHeader status={status} onOpenSettings={onOpenSettings} />
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        // SafeAreaView in App.tsx already eats the iOS top inset, so the
+        // keyboard offset is 0 — no double-counting. Setting it positive
+        // here is what previously left a gap at the bottom on Android-y
+        // devices.
+        keyboardVerticalOffset={0}
+      >
+        <ChatHeader status={status} onOpenSettings={onOpenSettings} />
 
-      <FlatList
-        ref={listRef}
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        data={messages}
-        keyExtractor={(m) => m.id}
-        renderItem={({ item }) => (
-          <View>
-            <Bubble message={item} />
-            {item.quickReplies ? (
-              <QuickReplies
-                options={item.quickReplies}
-                onPick={(opt) => pickQuickReply(opt, item.id)}
-              />
-            ) : null}
-          </View>
-        )}
-        ListFooterComponent={showTyping ? <TypingIndicator /> : null}
-      />
+        <FlatList
+          ref={listRef}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          data={messages}
+          keyExtractor={(m) => m.id}
+          renderItem={({ item }) => (
+            <View>
+              <Bubble message={item} />
+              {item.quickReplies ? (
+                <QuickReplies
+                  options={item.quickReplies}
+                  onPick={(opt) => pickQuickReply(opt, item.id)}
+                />
+              ) : null}
+            </View>
+          )}
+          ListFooterComponent={showTyping ? <TypingIndicator /> : null}
+          keyboardShouldPersistTaps="handled"
+        />
 
-      <Composer
-        onSend={send}
-        status={status}
-        voiceEnabled={recorderAvailable}
-        onToggleRecord={toggleRecord}
-        recording={recording}
-        transcribing={transcribing}
-      />
+        <Composer
+          onSend={send}
+          status={status}
+          voiceEnabled={recorderAvailable}
+          onToggleRecord={toggleRecord}
+          recording={recording}
+          transcribing={transcribing}
+        />
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -369,6 +382,7 @@ function ChatHeader({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
+  kav: { flex: 1 },
   center: {
     flex: 1,
     alignItems: "center",

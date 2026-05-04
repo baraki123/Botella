@@ -2,7 +2,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -48,10 +47,7 @@ export function Composer({
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={0}
-    >
+    <View>
       {status !== "open" ? (
         <View style={styles.statusBanner}>
           <View style={styles.statusBannerDot} />
@@ -112,7 +108,7 @@ export function Composer({
           <SendButton onPress={submit} ready={ready} />
         )}
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
