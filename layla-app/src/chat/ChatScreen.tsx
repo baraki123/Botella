@@ -280,7 +280,9 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={0}
+        // Small lift so the input clears the iOS QuickType suggestions bar
+        // with a hair of breathing room.
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
         <ChatHeader status={status} onOpenSettings={onOpenSettings} />
 
