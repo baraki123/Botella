@@ -1,10 +1,13 @@
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   KeyboardAvoidingView,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 
 import { connectStream, type StreamClient } from "../api/stream";
 import type { BotEvent } from "../api/types";
@@ -57,6 +61,73 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const [transcribing, setTranscribing] = useState(false);
   const insets = useSafeAreaInsets();
 
+  // ─── Scroll behavior — sticky-bottom + jump-to-latest pill ───────────
+  //
+  // ChatGPT/Claude.ai/iMessage convention: while the user is near the
+  // bottom of the list, every new message + every streaming token nudges
+  // the view down to keep the latest content visible. As soon as the
+  // user scrolls up to re-read something, auto-scroll stops — no
+  // yanking. A "↓ Latest" pill fades in over the bottom-right corner
+  // and tapping it (or sending a new message) snaps back to the bottom.
+  //
+  // Implementation: track at-bottom in a ref so the FlatList callbacks
+  // can read fresh state without re-rendering, and drive the pill's
+  // opacity off a separate Animated value so the fade doesn't depend on
+  // React state churn during fast streams.
+  const isAtBottomRef = useRef(true);
+  const userOverrideRef = useRef(false); // user manually scrolled away
+  const pillOpacity = useRef(new Animated.Value(0)).current;
+
+  const showPill = useCallback(
+    (visible: boolean) => {
+      Animated.timing(pillOpacity, {
+        toValue: visible ? 1 : 0,
+        duration: 180,
+        useNativeDriver: true,
+      }).start();
+    },
+    [pillOpacity],
+  );
+
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      const distanceFromBottom = Math.max(
+        0,
+        contentSize.height - layoutMeasurement.height - contentOffset.y,
+      );
+      const atBottom = distanceFromBottom < 60;
+      isAtBottomRef.current = atBottom;
+      if (atBottom) {
+        userOverrideRef.current = false;
+      }
+      showPill(!atBottom && messages.length > 0);
+    },
+    [messages.length, showPill],
+  );
+
+  const handleScrollBeginDrag = useCallback(() => {
+    // Any user-initiated drag means they're taking control. If they end
+    // up not-at-bottom, treat it as an override; we won't auto-follow
+    // streaming tokens until they're back near the bottom.
+    userOverrideRef.current = true;
+  }, []);
+
+  const handleContentSizeChange = useCallback(() => {
+    // Fires on every list-content size change (new message, streaming
+    // token append, typing indicator toggle). Sticky-bottom: scroll only
+    // if the user hasn't manually scrolled away.
+    if (!userOverrideRef.current) {
+      listRef.current?.scrollToEnd({ animated: true });
+    }
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    userOverrideRef.current = false;
+    showPill(false);
+    listRef.current?.scrollToEnd({ animated: true });
+  }, [showPill]);
+
   // 1. Bootstrap session.
   useEffect(() => {
     ensureSession()
@@ -89,17 +160,9 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     streamRef.current?.send({ text: "/start" });
   }, [status]);
 
-  // 4. Auto-scroll only when a NEW message lands (or typing dots show) —
-  // not on every streaming token. With the old behavior the screen
-  // tracked the bottom of Layla's reply as it grew, so the user only
-  // ever saw the last 2-3 lines of a long answer. Now we scroll once
-  // when the bot bubble first opens (first token bumps messages.length),
-  // then leave the view alone while it streams: short replies fit on
-  // screen and end up fully visible; long replies start at the top,
-  // and the user scrolls down to read the rest.
-  useEffect(() => {
-    listRef.current?.scrollToEnd({ animated: true });
-  }, [messages.length, showTyping]);
+  // (Auto-scroll is driven by FlatList.onContentSizeChange — see
+  // handleContentSizeChange above. Sticky-bottom: only follows new
+  // content when the user hasn't manually scrolled away.)
 
   function handleEvent(event: BotEvent) {
     switch (event.type) {
@@ -213,6 +276,10 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     // Always render the user's message immediately. The StreamClient queues
     // the wire-send if the WS isn't open and flushes on reconnect, so the
     // user never has to wonder whether their message went through.
+    // Sending also implies "I want to be at the latest" — clear any
+    // earlier scroll override so the new exchange auto-follows.
+    userOverrideRef.current = false;
+    showPill(false);
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
     streamRef.current?.send({ text, voice_origin: opts?.voice });
   }
@@ -317,26 +384,33 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       >
         <ChatHeader status={status} onOpenSettings={onOpenSettings} />
 
-        <FlatList
-          ref={listRef}
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          renderItem={({ item }) => (
-            <View>
-              <Bubble message={item} />
-              {item.quickReplies ? (
-                <QuickReplies
-                  options={item.quickReplies}
-                  onPick={(opt) => pickQuickReply(opt, item.id)}
-                />
-              ) : null}
-            </View>
-          )}
-          ListFooterComponent={showTyping ? <TypingIndicator /> : null}
-          keyboardShouldPersistTaps="handled"
-        />
+        <View style={styles.listWrap}>
+          <FlatList
+            ref={listRef}
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            data={messages}
+            keyExtractor={(m) => m.id}
+            renderItem={({ item }) => (
+              <View>
+                <Bubble message={item} />
+                {item.quickReplies ? (
+                  <QuickReplies
+                    options={item.quickReplies}
+                    onPick={(opt) => pickQuickReply(opt, item.id)}
+                  />
+                ) : null}
+              </View>
+            )}
+            ListFooterComponent={showTyping ? <TypingIndicator /> : null}
+            keyboardShouldPersistTaps="handled"
+            onScroll={handleScroll}
+            onScrollBeginDrag={handleScrollBeginDrag}
+            onContentSizeChange={handleContentSizeChange}
+            scrollEventThrottle={32}
+          />
+          <JumpToLatest opacity={pillOpacity} onPress={jumpToLatest} />
+        </View>
 
         <Composer
           onSend={send}
@@ -351,6 +425,42 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     </View>
   );
 }
+
+function JumpToLatest({
+  opacity,
+  onPress,
+}: {
+  opacity: Animated.Value;
+  onPress: () => void;
+}) {
+  // Floats over the bottom-right of the message list. Pointer-events
+  // none on the wrapper so the flat list still gets scroll touches in
+  // the area it covers; the inner Pressable handles taps. Hidden via
+  // opacity (animated by parent) — when invisible we also disable the
+  // Pressable so VoiceOver doesn't announce a phantom button.
+  return (
+    <Animated.View pointerEvents="box-none" style={[styles.pillWrap, { opacity }]}>
+      <Pressable
+        onPress={onPress}
+        accessibilityLabel="Jump to latest"
+        style={({ pressed }) => [styles.pill, pressed && { opacity: 0.7 }]}
+      >
+        <Svg width={14} height={14} viewBox="0 0 14 14">
+          <Path
+            d="M3 5 L7 9 L11 5"
+            stroke={theme.text}
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </Svg>
+        <Text style={styles.pillText}>Latest</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 
 function ChatHeader({
   status,
@@ -459,8 +569,35 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 0 },
   },
+  listWrap: { flex: 1 },
   list: { flex: 1 },
   listContent: { paddingVertical: 12 },
+  pillWrap: {
+    position: "absolute",
+    right: 14,
+    bottom: 14,
+  },
+  pill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: theme.surfaceRaised,
+    borderWidth: 1,
+    borderColor: theme.accentDim,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+  },
+  pillText: {
+    color: theme.text,
+    fontSize: 13,
+    letterSpacing: 0.4,
+  },
   errorTitle: { fontSize: 18, fontWeight: "600", color: theme.text, marginBottom: 8 },
   errorBody: { color: theme.textSubtle, textAlign: "center", marginBottom: 12 },
   errorHint: { color: theme.textSubtle, fontSize: 13, textAlign: "center" },
