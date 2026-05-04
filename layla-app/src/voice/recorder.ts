@@ -11,6 +11,7 @@ import { Platform } from "react-native";
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
+  setAudioModeAsync,
   useAudioRecorder,
 } from "expo-audio";
 
@@ -64,6 +65,14 @@ export function useVoiceRecorder(): VoiceRecorderHandle {
     if (!perm.granted) {
       throw new Error("Microphone permission was not granted");
     }
+    // iOS routes audio through an AVAudioSession category — without this,
+    // prepareToRecordAsync() flips on a "playback only" session and record()
+    // captures silence. Has to be called before prepare; safe to call every
+    // start (idempotent at the OS level).
+    await setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
+    });
     await recorder.prepareToRecordAsync();
     recorder.record();
   }, [recorder]);
@@ -84,6 +93,11 @@ export function useVoiceRecorder(): VoiceRecorderHandle {
     }
 
     await recorder.stop();
+    // Hand audio session back to "playback" so subsequent media (Layla's
+    // future TTS, ringtones, etc.) plays through the speaker normally.
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(
+      () => {},
+    );
     const uri = recorder.uri;
     if (!uri) return null;
     // expo-audio gives us a file:// URI on native; fetch reads it as a Blob
