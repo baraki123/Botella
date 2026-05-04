@@ -1,7 +1,8 @@
-import React from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Animated, Image, StyleSheet, Text, View } from "react-native";
 
 import { theme } from "../config/theme";
+import { useReducedMotion } from "../lib/useReducedMotion";
 import type { Message } from "./types";
 
 interface Props {
@@ -15,28 +16,70 @@ interface Props {
  *
  * User messages: a quiet charcoal-rose pill so the conversation has
  * rhythm and you can scan your own thread.
+ *
+ * Each new message fades up from 8px below over ~280ms (ease-out). The
+ * gold dot blooms in slightly after Layla's text starts settling — small
+ * timing detail that makes her presence feel composed rather than abrupt.
  */
 export function Bubble({ message }: Props) {
   const isUser = message.role === "user";
   const text = stripHtml(message.text);
+  const reduced = useReducedMotion();
+
+  const fade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+  const lift = useRef(new Animated.Value(reduced ? 0 : 8)).current;
+  const dotScale = useRef(new Animated.Value(reduced ? 1 : 0.5)).current;
+
+  useEffect(() => {
+    if (reduced) {
+      fade.setValue(1);
+      lift.setValue(0);
+      dotScale.setValue(1);
+      return;
+    }
+    Animated.parallel([
+      Animated.timing(fade, { toValue: 1, duration: 280, useNativeDriver: true }),
+      Animated.timing(lift, { toValue: 0, duration: 320, useNativeDriver: true }),
+      Animated.spring(dotScale, {
+        toValue: 1,
+        delay: 120,
+        damping: 9,
+        stiffness: 140,
+        mass: 0.5,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    // mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (isUser) {
     return (
-      <View style={[styles.row, styles.rowUser]}>
+      <Animated.View
+        style={[
+          styles.row,
+          styles.rowUser,
+          { opacity: fade, transform: [{ translateY: lift }] },
+        ]}
+      >
         <View style={styles.userBubble}>
           <Text style={styles.userText}>
             {text}
             {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
           </Text>
         </View>
-      </View>
+      </Animated.View>
     );
   }
 
   return (
-    <View style={styles.row}>
+    <Animated.View
+      style={[styles.row, { opacity: fade, transform: [{ translateY: lift }] }]}
+    >
       <View style={styles.botRow}>
-        <View style={styles.botDot} />
+        <Animated.View
+          style={[styles.botDot, { transform: [{ scale: dotScale }] }]}
+        />
         <View style={styles.botContent}>
           {message.imageUrl ? (
             <Image
@@ -53,7 +96,7 @@ export function Bubble({ message }: Props) {
           ) : null}
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -72,11 +115,21 @@ const styles = StyleSheet.create({
   },
   userBubble: {
     maxWidth: "80%",
-    paddingVertical: 9,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: theme.radius,
     borderBottomRightRadius: 6,
     backgroundColor: theme.bubbleUser,
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+    // Faint warm shadow so the user pill feels inset against the canvas
+    // rather than pasted on. Cheap on RN — no native overdraw beyond what
+    // the border already costs.
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   userText: {
     color: theme.bubbleUserText,
@@ -90,11 +143,18 @@ const styles = StyleSheet.create({
     paddingRight: 28,
   },
   botDot: {
-    width: 5,
-    height: 5,
+    width: 6,
+    height: 6,
     borderRadius: 3,
     backgroundColor: theme.accent,
-    marginTop: 11, // visual-align with first line of text
+    marginTop: 11,
+    // Soft halo around the gold dot — barely-there glow that catches the
+    // eye without making the dot look "lit up".
+    shadowColor: theme.accent,
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   botContent: {
     flex: 1,
@@ -109,7 +169,7 @@ const styles = StyleSheet.create({
   image: {
     width: "100%",
     aspectRatio: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     backgroundColor: "#0006",
   },
   caret: { opacity: 0.5, color: theme.accent },

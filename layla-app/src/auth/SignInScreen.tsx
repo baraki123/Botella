@@ -1,16 +1,19 @@
 /**
  * Pre-chat sign-in screen.
  *
- * Visual: dark twilight canvas. Large italic-serif "Layla" mark, then a
- * single line of her voice as a tagline. Two ways in — Apple (iOS only)
- * and a quiet "stay anonymous" text link beneath. App Store policy 4.8
- * is satisfied trivially: Apple is the only third-party sign-in shown,
- * and it's primary.
+ * Visual: dark twilight canvas with a quiet starfield + a soft golden
+ * glow behind the brand mark. The "Layla" wordmark fades up from below,
+ * the gold divider draws across like a thread of candlelight, then her
+ * tagline settles in. Two ways in — Apple (iOS only) and a "stay
+ * anonymous" link beneath. App Store policy 4.8 is satisfied trivially:
+ * Apple is the only third-party sign-in shown, and it's primary.
  */
 import * as AppleAuthentication from "expo-apple-authentication";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,8 +21,11 @@ import {
   View,
 } from "react-native";
 
+import { Glow } from "../chat/atmosphere/Glow";
+import { Starfield } from "../chat/atmosphere/Starfield";
 import { product } from "../config/product";
 import { theme } from "../config/theme";
+import { useReducedMotion } from "../lib/useReducedMotion";
 import { ensureSession, type Session } from "./anonymous";
 import { appleSignInAvailable, signInWithApple } from "./apple";
 
@@ -31,9 +37,62 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [busy, setBusy] = useState<"apple" | "anonymous" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const reduced = useReducedMotion();
+
+  const titleFade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+  const titleLift = useRef(new Animated.Value(reduced ? 0 : 18)).current;
+  const dividerScale = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+  const tagFade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
+  const actionsFade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
 
   useEffect(() => {
     appleSignInAvailable().then(setAppleAvailable);
+
+    if (reduced) return;
+    Animated.sequence([
+      // Title fades up first.
+      Animated.parallel([
+        Animated.timing(titleFade, {
+          toValue: 1,
+          duration: 700,
+          delay: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(titleLift, {
+          toValue: 0,
+          duration: 800,
+          delay: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+      // Then the divider draws across (scaleX 0 → 1).
+      Animated.timing(dividerScale, {
+        toValue: 1,
+        duration: 700,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      // Tagline + actions settle in last.
+      Animated.parallel([
+        Animated.timing(tagFade, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(actionsFade, {
+          toValue: 1,
+          duration: 600,
+          delay: 100,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+    // mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function tryApple() {
@@ -68,13 +127,33 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
 
   return (
     <View style={styles.root}>
+      {/* Atmosphere — sits behind the title, gives it presence. */}
+      <Glow corner="top-left" intensity={0.32} />
+      <Starfield introDelay={500} />
+
       <View style={styles.hero}>
-        <Text style={styles.title}>{product.name}</Text>
-        <View style={styles.divider} />
-        <Text style={styles.tag}>{product.greeting}</Text>
+        <Animated.Text
+          style={[
+            styles.title,
+            { opacity: titleFade, transform: [{ translateY: titleLift }] },
+          ]}
+        >
+          {product.name}
+        </Animated.Text>
+        <Animated.View
+          style={[
+            styles.divider,
+            {
+              transform: [{ scaleX: dividerScale }],
+            },
+          ]}
+        />
+        <Animated.Text style={[styles.tag, { opacity: tagFade }]}>
+          {product.greeting}
+        </Animated.Text>
       </View>
 
-      <View style={styles.actions}>
+      <Animated.View style={[styles.actions, { opacity: actionsFade }]}>
         {appleAvailable ? (
           <AppleAuthentication.AppleAuthenticationButton
             buttonType={
@@ -119,7 +198,7 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
         <Text style={styles.privacy}>
           Everything you share with Layla is private to you.
         </Text>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -132,20 +211,34 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     justifyContent: "space-between",
   },
-  hero: { marginTop: 72, alignItems: "flex-start" },
+  hero: { marginTop: 76, alignItems: "flex-start" },
   title: {
-    fontSize: 72,
+    fontSize: 76,
     fontFamily: theme.fontSerifItalic,
     color: theme.text,
-    marginBottom: 18,
+    marginBottom: 22,
     letterSpacing: 0.5,
+    // Whisper-soft gold halo behind the title — feels like the wordmark
+    // is catching candlelight, not glowing neon.
+    textShadowColor: "rgba(212,165,116,0.35)",
+    textShadowRadius: 18,
+    textShadowOffset: { width: 0, height: 0 },
   },
   divider: {
-    width: 36,
+    width: 56,
     height: 1.5,
     backgroundColor: theme.accent,
-    marginBottom: 22,
-    opacity: 0.7,
+    marginBottom: 26,
+    opacity: 0.85,
+    transformOrigin: "left",
+    // Inset the scaleX origin to the left so the line "draws" from the
+    // wordmark outward, not from the middle out. RN supports this on
+    // recent versions; older ones still get a centered scale, which is
+    // fine.
+    shadowColor: theme.accent,
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
   },
   tag: {
     fontSize: 17,
@@ -154,16 +247,17 @@ const styles = StyleSheet.create({
     maxWidth: 380,
   },
   actions: { gap: 18, marginBottom: 16 },
-  appleBtn: { width: "100%", height: 48 },
+  appleBtn: { width: "100%", height: 50 },
   skip: {
     alignItems: "center",
     paddingVertical: 14,
   },
-  skipPressed: { opacity: 0.5 },
+  skipPressed: { opacity: 0.55 },
   skipLabel: {
     fontSize: 15,
     color: theme.accent,
     letterSpacing: 0.6,
+    fontFamily: theme.fontSerifItalic,
   },
   error: {
     color: "#C97777",

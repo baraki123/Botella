@@ -1,3 +1,4 @@
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,6 +23,8 @@ import { Bubble } from "./Bubble";
 import { Composer } from "./Composer";
 import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator } from "./TypingIndicator";
+import { Glow } from "./atmosphere/Glow";
+import { Starfield } from "./atmosphere/Starfield";
 import type { Message } from "./types";
 
 function uid(): string {
@@ -263,34 +266,14 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View
-            style={[
-              styles.statusDot,
-              {
-                backgroundColor:
-                  status === "open"
-                    ? theme.statusOpen
-                    : status === "connecting"
-                      ? theme.statusConnecting
-                      : theme.statusClosed,
-              },
-            ]}
-          />
-          <Text style={styles.headerTitle}>{product.name}</Text>
-        </View>
-        {onOpenSettings ? (
-          <Pressable
-            onPress={onOpenSettings}
-            style={({ pressed }) => [styles.settingsBtn, pressed && { opacity: 0.5 }]}
-            accessibilityLabel="Settings"
-            hitSlop={10}
-          >
-            <Text style={styles.settingsIcon}>⋯</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      {/* Atmosphere stack — pointer-events: none on every layer.
+          Order matters: glow first (closest to canvas), then sparkles
+          on top so the brightest stars are still visible inside the glow.
+          Both sit BEHIND the chat content. */}
+      <Glow corner="top-left" intensity={0.18} />
+      <Starfield />
+
+      <ChatHeader status={status} onOpenSettings={onOpenSettings} />
 
       <FlatList
         ref={listRef}
@@ -324,6 +307,66 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   );
 }
 
+function ChatHeader({
+  status,
+  onOpenSettings,
+}: {
+  status: "open" | "connecting" | "closed";
+  onOpenSettings?: () => void;
+}) {
+  const dotColor = useMemo(() => {
+    if (status === "open") return theme.statusOpen;
+    if (status === "connecting") return theme.statusConnecting;
+    return theme.statusClosed;
+  }, [status]);
+
+  return (
+    <View style={styles.header}>
+      <View style={styles.headerInner}>
+        <View style={styles.headerLeft}>
+          <View
+            style={[
+              styles.statusDot,
+              {
+                backgroundColor: dotColor,
+                shadowColor: dotColor,
+              },
+            ]}
+          />
+          <Text style={styles.headerTitle}>{product.name}</Text>
+        </View>
+        {onOpenSettings ? (
+          <Pressable
+            onPress={onOpenSettings}
+            style={({ pressed }) => [
+              styles.settingsBtn,
+              pressed && { opacity: 0.5 },
+            ]}
+            accessibilityLabel="Settings"
+            hitSlop={10}
+          >
+            <Text style={styles.settingsIcon}>⋯</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {/* Soft gold hairline gradient under the header — fades in from
+          edges, peaks in the middle. Replaces the flat 1px border with
+          something that feels like firelight on a windowsill. */}
+      <LinearGradient
+        colors={[
+          "rgba(212,165,116,0)",
+          "rgba(212,165,116,0.45)",
+          "rgba(212,165,116,0)",
+        ]}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerHairline}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
   center: {
@@ -334,22 +377,27 @@ const styles = StyleSheet.create({
     backgroundColor: theme.bg,
   },
   header: {
+    backgroundColor: "transparent",
+  },
+  headerInner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: theme.spacing + 6,
     paddingTop: 16,
     paddingBottom: 14,
-    backgroundColor: theme.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.border,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 24,
     color: theme.text,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.5,
+  },
+  headerHairline: {
+    height: 1,
+    width: "100%",
+    opacity: 0.9,
   },
   settingsBtn: {
     paddingHorizontal: 10,
@@ -357,7 +405,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   settingsIcon: { fontSize: 24, color: theme.textSubtle, lineHeight: 24 },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    shadowOpacity: 0.7,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 0 },
+  },
   list: { flex: 1 },
   listContent: { paddingVertical: 12 },
   errorTitle: { fontSize: 18, fontWeight: "600", color: theme.text, marginBottom: 8 },

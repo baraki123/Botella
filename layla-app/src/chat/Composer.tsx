@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import { LinearGradient } from "expo-linear-gradient";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,6 +12,7 @@ import {
 } from "react-native";
 
 import { theme } from "../config/theme";
+import { useReducedMotion } from "../lib/useReducedMotion";
 
 interface Props {
   onSend: (text: string) => void;
@@ -35,6 +38,7 @@ export function Composer({
   transcribing,
 }: Props) {
   const [value, setValue] = useState("");
+  const [focused, setFocused] = useState(false);
   const ready = !!value.trim();
 
   const submit = () => {
@@ -59,68 +63,169 @@ export function Composer({
         </View>
       ) : null}
       <View style={styles.bar}>
-        <TextInput
-          style={styles.input}
-          value={recording ? "" : value}
-          onChangeText={setValue}
-          placeholder={
-            recording
-              ? "Listening…"
-              : transcribing
-              ? "Transcribing…"
-              : "Tell Layla…"
-          }
-          placeholderTextColor={theme.textMuted}
-          onSubmitEditing={submit}
-          returnKeyType="send"
-          editable={!recording && !transcribing}
-          blurOnSubmit={false}
-          multiline
-          // Web: Enter sends, Shift+Enter newlines.
-          onKeyPress={
-            Platform.OS === "web"
-              ? (e: any) => {
-                  const ne = e.nativeEvent || {};
-                  if (ne.key === "Enter" && !ne.shiftKey) {
-                    e.preventDefault?.();
-                    submit();
+        <View
+          style={[
+            styles.inputWrap,
+            focused && styles.inputWrapFocused,
+          ]}
+        >
+          <TextInput
+            style={styles.input}
+            value={recording ? "" : value}
+            onChangeText={setValue}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder={
+              recording
+                ? "Listening…"
+                : transcribing
+                ? "Transcribing…"
+                : "Tell Layla…"
+            }
+            placeholderTextColor={theme.textMuted}
+            onSubmitEditing={submit}
+            returnKeyType="send"
+            editable={!recording && !transcribing}
+            blurOnSubmit={false}
+            multiline
+            // Web: Enter sends, Shift+Enter newlines.
+            onKeyPress={
+              Platform.OS === "web"
+                ? (e: any) => {
+                    const ne = e.nativeEvent || {};
+                    if (ne.key === "Enter" && !ne.shiftKey) {
+                      e.preventDefault?.();
+                      submit();
+                    }
                   }
-                }
-              : undefined
-          }
-        />
+                : undefined
+            }
+          />
+        </View>
         {voiceEnabled && !ready ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={recording ? "stop recording" : "record voice"}
+          <MicButton
             onPress={onToggleRecord}
-            disabled={transcribing}
-            style={({ pressed }) => [
-              styles.send,
-              recording && styles.micRecording,
-              !recording && styles.micIdle,
-              pressed && styles.sendPressed,
-            ]}
-          >
-            <MicIcon active={!!recording} />
-          </Pressable>
+            recording={!!recording}
+            transcribing={!!transcribing}
+          />
         ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="send"
-            onPress={submit}
-            disabled={!ready}
-            style={({ pressed }) => [
-              styles.send,
-              !ready && styles.sendDim,
-              pressed && ready && styles.sendPressed,
-            ]}
-          >
-            <SendIcon active={ready} />
-          </Pressable>
+          <SendButton onPress={submit} ready={ready} />
         )}
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+function SendButton({
+  onPress,
+  ready,
+}: {
+  onPress: () => void;
+  ready: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="send"
+      onPress={onPress}
+      disabled={!ready}
+      style={({ pressed }) => [
+        styles.sendShell,
+        pressed && ready && { opacity: 0.85 },
+      ]}
+    >
+      {ready ? (
+        <LinearGradient
+          colors={["#E5BD92", "#D4A574", "#B7884E"]}
+          locations={[0, 0.55, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.sendCore, styles.sendCoreActive]}
+        >
+          <SendIcon active />
+        </LinearGradient>
+      ) : (
+        <View style={[styles.sendCore, styles.sendCoreDim]}>
+          <SendIcon active={false} />
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+function MicButton({
+  onPress,
+  recording,
+  transcribing,
+}: {
+  onPress?: () => void;
+  recording: boolean;
+  transcribing: boolean;
+}) {
+  const reduced = useReducedMotion();
+  const ring = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!recording || reduced) {
+      ring.stopAnimation();
+      ring.setValue(recording && reduced ? 0.5 : 0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(ring, { toValue: 1, duration: 1100, useNativeDriver: true }),
+        Animated.timing(ring, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [recording, reduced, ring]);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={recording ? "stop recording" : "record voice"}
+      onPress={onPress}
+      disabled={transcribing}
+      style={({ pressed }) => [
+        styles.sendShell,
+        pressed && { opacity: 0.85 },
+      ]}
+    >
+      {/* Pulse ring — only renders while recording. Scales 1 → 1.6 and
+          fades 0.55 → 0 over 1.1s, on a loop. Reduced-motion users get
+          a static ring at mid-opacity so the state is still legible. */}
+      {recording ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.micRing,
+            {
+              opacity: ring.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.55, 0],
+              }),
+              transform: [
+                {
+                  scale: ring.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 1.6],
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
+      ) : null}
+      <View
+        style={[
+          styles.sendCore,
+          recording ? styles.micCoreRecording : styles.micCoreIdle,
+        ]}
+      >
+        <MicIcon active={recording} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -155,38 +260,80 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: 10,
+    paddingBottom: 14,
     backgroundColor: theme.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.border,
     gap: 10,
   },
-  input: {
+  inputWrap: {
     flex: 1,
-    paddingVertical: 11,
-    paddingHorizontal: 16,
     backgroundColor: theme.bg,
     borderWidth: 1,
     borderColor: theme.border,
     borderRadius: 22,
+    overflow: "hidden",
+  },
+  inputWrapFocused: {
+    borderColor: theme.accentDim,
+    shadowColor: theme.accent,
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 2,
+  },
+  input: {
+    paddingVertical: 11,
+    paddingHorizontal: 16,
     fontSize: 16,
     color: theme.text,
     maxHeight: 140,
+    lineHeight: 22,
   },
-  send: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: theme.accent,
+  sendShell: {
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
-  sendDim: {
+  sendCore: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sendCoreActive: {
+    shadowColor: theme.accent,
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  sendCoreDim: {
     backgroundColor: theme.surfaceRaised,
   },
-  sendPressed: {
-    backgroundColor: theme.accentDim,
+  micCoreIdle: {
+    backgroundColor: theme.surfaceRaised,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  micCoreRecording: {
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOpacity: 0.7,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  micRing: {
+    position: "absolute",
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 2,
+    borderColor: theme.accent,
   },
   iconWrap: { width: 18, height: 18, alignItems: "center", justifyContent: "center" },
   iconArrow: {
@@ -218,12 +365,6 @@ const styles = StyleSheet.create({
     width: 8,
     height: 1.5,
     bottom: 0,
-  },
-  micIdle: {
-    backgroundColor: theme.surfaceRaised,
-  },
-  micRecording: {
-    backgroundColor: "#c85b6f",
   },
   statusBanner: {
     flexDirection: "row",
