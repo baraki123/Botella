@@ -25,7 +25,11 @@ import {
 import { product } from "../config/product";
 import { theme } from "../config/theme";
 import { clearSession, loadCachedSession } from "../auth/anonymous";
-import { currentAuthProvider } from "../auth/apple";
+import {
+  appleSignInAvailable,
+  currentAuthProvider,
+  signInWithApple,
+} from "../auth/apple";
 
 const PRIVACY_URL = "https://layla.app/privacy"; // TODO: real URL before submission
 const TERMS_URL = "https://layla.app/terms";
@@ -36,11 +40,37 @@ export interface SettingsScreenProps {
 
 export function SettingsScreen({ onSignedOut }: SettingsScreenProps) {
   const [provider, setProvider] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"signout" | "delete" | null>(null);
+  const [busy, setBusy] = useState<"signout" | "delete" | "link" | null>(null);
+  const [canLinkApple, setCanLinkApple] = useState(false);
 
   useEffect(() => {
     currentAuthProvider().then((p) => setProvider(p ?? "anonymous"));
+    appleSignInAvailable().then(setCanLinkApple);
   }, []);
+
+  async function handleLinkApple() {
+    setBusy("link");
+    try {
+      const session = await loadCachedSession();
+      if (!session) throw new Error("not signed in yet");
+      await signInWithApple({ linkAnonymousUserId: session.userId });
+      setProvider("apple");
+    } catch (e: any) {
+      // User cancelled the Apple sheet OR the request failed. Both surface
+      // the same way — only complain when it's a real error.
+      const code = e?.code;
+      if (code !== "ERR_REQUEST_CANCELED") {
+        if (Platform.OS === "web") {
+          // @ts-ignore
+          window.alert?.(`Couldn't link Apple: ${e?.message ?? e}`);
+        } else {
+          Alert.alert("Couldn't link Apple", String(e?.message ?? e));
+        }
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function handleSignOut() {
     setBusy("signout");
@@ -114,6 +144,13 @@ export function SettingsScreen({ onSignedOut }: SettingsScreenProps) {
 
       <Section title="Account">
         <Row label="Signed in with" value={provider === "apple" ? "Apple" : "Anonymous device"} />
+        {provider !== "apple" && canLinkApple ? (
+          <ActionRow
+            label="Sign in with Apple to keep your data"
+            onPress={handleLinkApple}
+            busy={busy === "link"}
+          />
+        ) : null}
         <ActionRow
           label="Sign out"
           onPress={handleSignOut}

@@ -12,6 +12,11 @@ import type { BotEvent } from "../api/types";
 import { ensureSession, type Session } from "../auth/anonymous";
 import { product } from "../config/product";
 import { theme } from "../config/theme";
+import {
+  recorderAvailable,
+  transcribe,
+  useVoiceRecorder,
+} from "../voice/recorder";
 import { Bubble } from "./Bubble";
 import { Composer } from "./Composer";
 import { QuickReplies } from "./QuickReplies";
@@ -33,6 +38,9 @@ export function ChatScreen() {
   const streamRef = useRef<StreamClient | null>(null);
   const streamingIdRef = useRef<string | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
+  const voice = useVoiceRecorder();
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
 
   // 1. Bootstrap session.
   useEffect(() => {
@@ -136,6 +144,23 @@ export function ChatScreen() {
         return;
       }
 
+      case "media": {
+        setShowTyping(false);
+        const url =
+          event.payload.image_data_url || event.payload.image_url || "";
+        if (!url) return;
+        setMessages((m) => [
+          ...m,
+          {
+            id: uid(),
+            role: "bot",
+            text: event.payload.caption || "",
+            imageUrl: url,
+          },
+        ]);
+        return;
+      }
+
       case "turn_end":
         setShowTyping(false);
         return;
@@ -145,15 +170,14 @@ export function ChatScreen() {
         return;
 
       default:
-        // media, future event types — ignore for the demo
         return;
     }
   }
 
-  function send(text: string) {
+  function send(text: string, opts?: { voice?: boolean }) {
     if (!streamRef.current) return;
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
-    streamRef.current.send({ text });
+    streamRef.current.send({ text, voice_origin: opts?.voice });
   }
 
   function pickQuickReply(option: string, fromMessageId: string) {
@@ -164,6 +188,34 @@ export function ChatScreen() {
       ),
     );
     send(option);
+  }
+
+  async function toggleRecord() {
+    if (transcribing) return;
+    if (!recording) {
+      try {
+        await voice.start();
+        setRecording(true);
+      } catch (e: any) {
+        console.warn("recorder start failed", e?.message || e);
+        setRecording(false);
+      }
+      return;
+    }
+    setRecording(false);
+    if (!session) return;
+    setTranscribing(true);
+    try {
+      const blob = await voice.stop();
+      if (!blob || blob.size < 200) return;
+      const text = await transcribe(product.apiUrl, session.jwt, blob);
+      if (!text) return;
+      send(text, { voice: true });
+    } catch (e: any) {
+      console.warn("transcribe failed", e?.message || e);
+    } finally {
+      setTranscribing(false);
+    }
   }
 
   if (authError) {
@@ -228,7 +280,14 @@ export function ChatScreen() {
         ListFooterComponent={showTyping ? <TypingIndicator /> : null}
       />
 
-      <Composer onSend={send} disabled={status !== "open"} />
+      <Composer
+        onSend={send}
+        disabled={status !== "open"}
+        voiceEnabled={recorderAvailable}
+        onToggleRecord={toggleRecord}
+        recording={recording}
+        transcribing={transcribing}
+      />
     </View>
   );
 }

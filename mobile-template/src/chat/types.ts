@@ -8,4 +8,6 @@ export interface Message {
   streaming?: boolean;
   /** Quick-reply chips attached to a bot message. */
   quickReplies?: string[];
+  /** Inline image — data URL or remote URL. */
+  imageUrl?: string;
 }

@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 
 import { theme } from "../config/theme";
 import type { Message } from "./types";
@@ -37,10 +37,21 @@ export function Bubble({ message }: Props) {
     <View style={styles.row}>
       <View style={styles.botRow}>
         <View style={styles.botDot} />
-        <Text style={styles.botText}>
-          {text}
-          {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
-        </Text>
+        <View style={styles.botContent}>
+          {message.imageUrl ? (
+            <Image
+              source={{ uri: message.imageUrl }}
+              style={styles.image}
+              resizeMode="contain"
+            />
+          ) : null}
+          {text ? (
+            <Text style={styles.botText}>
+              {text}
+              {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
+            </Text>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -85,12 +96,21 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     marginTop: 11, // visual-align with first line of text
   },
-  botText: {
+  botContent: {
     flex: 1,
+    gap: 8,
+  },
+  botText: {
     color: theme.bubbleBotText,
     fontSize: 17,
     lineHeight: 26,
     letterSpacing: 0.1,
+  },
+  image: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: 12,
+    backgroundColor: "#0006",
   },
   caret: { opacity: 0.5, color: theme.accent },
 });

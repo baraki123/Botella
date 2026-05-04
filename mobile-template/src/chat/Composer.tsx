@@ -13,15 +13,27 @@ import { theme } from "../config/theme";
 interface Props {
   onSend: (text: string) => void;
   disabled?: boolean;
+  /** Show a microphone button (web only for now). */
+  voiceEnabled?: boolean;
+  onToggleRecord?: () => void;
+  recording?: boolean;
+  transcribing?: boolean;
 }
 
-export function Composer({ onSend, disabled }: Props) {
+export function Composer({
+  onSend,
+  disabled,
+  voiceEnabled,
+  onToggleRecord,
+  recording,
+  transcribing,
+}: Props) {
   const [value, setValue] = useState("");
+  const ready = !!value.trim() && !disabled;
 
   const submit = () => {
-    const trimmed = value.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
+    if (!ready) return;
+    onSend(value.trim());
     setValue("");
   };
 
@@ -33,13 +45,19 @@ export function Composer({ onSend, disabled }: Props) {
       <View style={styles.bar}>
         <TextInput
           style={styles.input}
-          value={value}
+          value={recording ? "" : value}
           onChangeText={setValue}
-          placeholder="Message"
+          placeholder={
+            recording
+              ? "Listening…"
+              : transcribing
+              ? "Transcribing…"
+              : "Message"
+          }
           placeholderTextColor={theme.textSubtle}
           onSubmitEditing={submit}
           returnKeyType="send"
-          editable={!disabled}
+          editable={!disabled && !recording && !transcribing}
           blurOnSubmit={false}
           multiline
           // Web: with multiline, Enter normally inserts a newline. For a chat
@@ -56,19 +74,35 @@ export function Composer({ onSend, disabled }: Props) {
               : undefined
           }
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="send"
-          onPress={submit}
-          disabled={!value.trim() || disabled}
-          style={({ pressed }) => [
-            styles.send,
-            (!value.trim() || disabled) && { opacity: 0.4 },
-            pressed && { opacity: 0.7 },
-          ]}
-        >
-          <SendIcon />
-        </Pressable>
+        {voiceEnabled && !ready ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={recording ? "stop recording" : "record voice"}
+            onPress={onToggleRecord}
+            disabled={transcribing}
+            style={({ pressed }) => [
+              styles.send,
+              recording && { backgroundColor: "#c85b6f" },
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <MicIcon />
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="send"
+            onPress={submit}
+            disabled={!ready}
+            style={({ pressed }) => [
+              styles.send,
+              !ready && { opacity: 0.4 },
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <SendIcon />
+          </Pressable>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -79,6 +113,16 @@ function SendIcon() {
   return (
     <View style={styles.iconWrap}>
       <View style={styles.iconArrow} />
+    </View>
+  );
+}
+
+function MicIcon() {
+  return (
+    <View style={styles.iconWrap}>
+      <View style={styles.micBody} />
+      <View style={styles.micBase} />
+      <View style={styles.micStem} />
     </View>
   );
 }
@@ -123,5 +167,27 @@ const styles = StyleSheet.create({
     borderTopColor: "transparent",
     borderBottomColor: "transparent",
     transform: [{ translateX: -2 }],
+  },
+  micBody: {
+    position: "absolute",
+    width: 6,
+    height: 9,
+    top: 1,
+    borderRadius: 3,
+    backgroundColor: "#FFFFFF",
+  },
+  micStem: {
+    position: "absolute",
+    width: 1.5,
+    height: 3,
+    bottom: 2,
+    backgroundColor: "#FFFFFF",
+  },
+  micBase: {
+    position: "absolute",
+    width: 8,
+    height: 1.5,
+    bottom: 0,
+    backgroundColor: "#FFFFFF",
   },
 });

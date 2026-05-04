@@ -47,6 +47,18 @@ class MemoryStorage:
             self._users.setdefault(user_id, {})
             return user_id
 
+    async def link_identity(
+        self, provider: str, external_id: str, target_user_id: str
+    ) -> str:
+        async with self._lock:
+            key = (provider, external_id)
+            existing = self._identities.get(key)
+            if existing is not None:
+                return existing
+            self._identities[key] = target_user_id
+            self._users.setdefault(target_user_id, {})
+            return target_user_id
+
     # ─── User data ───────────────────────────────────────────────────────
 
     async def get_user(self, user_id: str) -> dict[str, Any]:

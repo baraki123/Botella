@@ -16,9 +16,24 @@ interface Props {
   /** Connection status — for a small visual cue, NOT for blocking input.
    * Messages typed while not "open" are queued and flushed on reconnect. */
   status?: "open" | "connecting" | "closed";
+  /** Show a microphone button (web only for now). */
+  voiceEnabled?: boolean;
+  /** Tap toggles record on/off. Caller owns the recording lifecycle. */
+  onToggleRecord?: () => void;
+  /** Indicates we're actively capturing audio. */
+  recording?: boolean;
+  /** True while the audio is uploading + transcribing. */
+  transcribing?: boolean;
 }
 
-export function Composer({ onSend, status = "open" }: Props) {
+export function Composer({
+  onSend,
+  status = "open",
+  voiceEnabled,
+  onToggleRecord,
+  recording,
+  transcribing,
+}: Props) {
   const [value, setValue] = useState("");
   const ready = !!value.trim();
 
@@ -46,13 +61,19 @@ export function Composer({ onSend, status = "open" }: Props) {
       <View style={styles.bar}>
         <TextInput
           style={styles.input}
-          value={value}
+          value={recording ? "" : value}
           onChangeText={setValue}
-          placeholder="Tell Layla…"
+          placeholder={
+            recording
+              ? "Listening…"
+              : transcribing
+              ? "Transcribing…"
+              : "Tell Layla…"
+          }
           placeholderTextColor={theme.textMuted}
           onSubmitEditing={submit}
           returnKeyType="send"
-          editable={true}
+          editable={!recording && !transcribing}
           blurOnSubmit={false}
           multiline
           // Web: Enter sends, Shift+Enter newlines.
@@ -68,19 +89,36 @@ export function Composer({ onSend, status = "open" }: Props) {
               : undefined
           }
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="send"
-          onPress={submit}
-          disabled={!ready}
-          style={({ pressed }) => [
-            styles.send,
-            !ready && styles.sendDim,
-            pressed && ready && styles.sendPressed,
-          ]}
-        >
-          <SendIcon active={ready} />
-        </Pressable>
+        {voiceEnabled && !ready ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={recording ? "stop recording" : "record voice"}
+            onPress={onToggleRecord}
+            disabled={transcribing}
+            style={({ pressed }) => [
+              styles.send,
+              recording && styles.micRecording,
+              !recording && styles.micIdle,
+              pressed && styles.sendPressed,
+            ]}
+          >
+            <MicIcon active={!!recording} />
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="send"
+            onPress={submit}
+            disabled={!ready}
+            style={({ pressed }) => [
+              styles.send,
+              !ready && styles.sendDim,
+              pressed && ready && styles.sendPressed,
+            ]}
+          >
+            <SendIcon active={ready} />
+          </Pressable>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -95,6 +133,19 @@ function SendIcon({ active }: { active: boolean }) {
           { borderLeftColor: active ? theme.bg : theme.textMuted },
         ]}
       />
+    </View>
+  );
+}
+
+function MicIcon({ active }: { active: boolean }) {
+  // Minimal mic glyph — vertical capsule + base + stem. Stays simple so it
+  // reads at 18px on mobile.
+  const fg = active ? theme.bg : theme.text;
+  return (
+    <View style={styles.iconWrap}>
+      <View style={[styles.micBody, { backgroundColor: fg }]} />
+      <View style={[styles.micBase, { backgroundColor: fg }]} />
+      <View style={[styles.micStem, { backgroundColor: fg }]} />
     </View>
   );
 }
@@ -148,6 +199,31 @@ const styles = StyleSheet.create({
     borderTopColor: "transparent",
     borderBottomColor: "transparent",
     transform: [{ translateX: -2 }],
+  },
+  micBody: {
+    position: "absolute",
+    width: 6,
+    height: 9,
+    top: 1,
+    borderRadius: 3,
+  },
+  micStem: {
+    position: "absolute",
+    width: 1.5,
+    height: 3,
+    bottom: 2,
+  },
+  micBase: {
+    position: "absolute",
+    width: 8,
+    height: 1.5,
+    bottom: 0,
+  },
+  micIdle: {
+    backgroundColor: theme.surfaceRaised,
+  },
+  micRecording: {
+    backgroundColor: "#c85b6f",
   },
   statusBanner: {
     flexDirection: "row",

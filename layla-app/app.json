@@ -44,7 +44,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Layla uses your microphone for voice messages so you can talk to her instead of typing."
+        }
+      ]
     ],
     "extra": {
       "eas": {

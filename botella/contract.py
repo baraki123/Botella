@@ -43,6 +43,11 @@ class InboundMessage:
     image: bytes | None = None
     location: tuple[float, float] | None = None
     callback_data: str | None = None  # e.g. inline button payload on Telegram
+    # True when this text came from a voice transcription, even if the raw
+    # audio bytes are no longer attached. Lets free_chat flip Layla's voice-
+    # note persona on iOS/web (where audio is uploaded via /v1/voice and
+    # only the transcript flows back over WS).
+    voice_origin: bool = False
 
 
 # ─── Outbound ────────────────────────────────────────────────────────────────
@@ -223,6 +228,30 @@ class Storage(Protocol):
     async def resolve_identity(self, provider: str, external_id: str) -> str:
         """Return the internal user_id for (provider, external_id), creating
         a fresh user if none exists."""
+        ...
+
+    async def link_identity(
+        self,
+        provider: str,
+        external_id: str,
+        target_user_id: str,
+    ) -> str:
+        """Attach (provider, external_id) to `target_user_id`.
+
+        Used for account upgrades: an anonymous user signs in with Apple,
+        and we want the Apple identity to point at the SAME internal user
+        instead of creating a new one (which would orphan the chart, history,
+        and people the user has already built up).
+
+        Returns the internal_user_id the (provider, external_id) pair
+        actually maps to after the call:
+          - If the pair was free, it now maps to `target_user_id` and we
+            return `target_user_id`.
+          - If it was already mapped to a different user, that conflict
+            stands and we return the existing user_id so the caller can
+            decide whether to merge / surface the conflict / keep going on
+            the existing account.
+        """
         ...
 
     # Per-user opaque data — the bot's domain (name, chart, preferences, …)

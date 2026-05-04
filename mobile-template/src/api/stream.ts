@@ -9,8 +9,14 @@ import type { BotEvent } from "./types";
 
 type EventHandler = (event: BotEvent) => void;
 
+export interface OutboundFrame {
+  text?: string;
+  callback_data?: string;
+  voice_origin?: boolean;
+}
+
 export interface StreamClient {
-  send(message: { text?: string; callback_data?: string }): void;
+  send(message: OutboundFrame): void;
   close(): void;
   onEvent(fn: EventHandler): () => void;
   onStatus(fn: (status: "connecting" | "open" | "closed") => void): () => void;

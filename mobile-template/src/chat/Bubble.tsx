@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 
 import { theme } from "../config/theme";
 import type { Message } from "./types";
@@ -26,14 +26,23 @@ export function Bubble({ message }: Props) {
             : { borderBottomLeftRadius: 4 },
         ]}
       >
-        <Text
-          style={isUser ? styles.textUser : styles.textBot}
-          // The server sometimes emits HTML (<b>, <i>) for Telegram parity.
-          // For a v0 demo we strip HTML to keep things readable on mobile.
-        >
-          {stripHtml(message.text)}
-          {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
-        </Text>
+        {message.imageUrl ? (
+          <Image
+            source={{ uri: message.imageUrl }}
+            style={styles.image}
+            resizeMode="contain"
+          />
+        ) : null}
+        {message.text || message.streaming ? (
+          <Text
+            style={isUser ? styles.textUser : styles.textBot}
+            // The server sometimes emits HTML (<b>, <i>) for Telegram parity.
+            // For a v0 demo we strip HTML to keep things readable on mobile.
+          >
+            {stripHtml(message.text)}
+            {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -59,5 +68,12 @@ const styles = StyleSheet.create({
   bubbleBot: { backgroundColor: theme.bubbleBot },
   textUser: { color: theme.bubbleUserText, fontSize: 16, lineHeight: 22 },
   textBot: { color: theme.bubbleBotText, fontSize: 16, lineHeight: 22 },
+  image: {
+    width: 260,
+    height: 260,
+    borderRadius: 8,
+    marginBottom: 6,
+    backgroundColor: "#0006",
+  },
   caret: { opacity: 0.5 },
 });

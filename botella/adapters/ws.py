@@ -57,6 +57,7 @@ def build_ws_router(manifest: BotManifest) -> APIRouter:
                     transport=body.get("transport", "ios"),
                     text=body.get("text"),
                     callback_data=body.get("callback_data"),
+                    voice_origin=bool(body.get("voice_origin", False)),
                 )
 
                 async for event in runtime.run(msg, manifest):
@@ -79,8 +80,13 @@ def build_ws_router(manifest: BotManifest) -> APIRouter:
 
 
 def _scrub(payload: dict[str, Any]) -> dict[str, Any]:
-    """Strip raw bytes from media payloads — JSON can't carry them."""
+    """Encode raw image bytes as a base64 data URL — JSON can't carry them
+    natively, but a data URL drops straight into an <img src=...>."""
     out = dict(payload)
-    if "image" in out and isinstance(out["image"], (bytes, bytearray)):
-        out["image"] = "<binary>"
+    img = out.get("image")
+    if isinstance(img, (bytes, bytearray)):
+        import base64
+        b64 = base64.b64encode(bytes(img)).decode("ascii")
+        out["image"] = None
+        out["image_data_url"] = f"data:image/png;base64,{b64}"
     return out

@@ -1,6 +1,32 @@
 # botella — context
 
-> **Handoff doc.** A fresh Claude session can read this top-to-bottom and pick up the work cold. Last updated 2026-05-03 mid-day. Read `LAUNCH_PLAN.md` next for the night-of-2026-05-02 progress log.
+> **Handoff doc.** A fresh Claude session can read this top-to-bottom and pick up the work cold. Last updated 2026-05-03 afternoon. Read `LAUNCH_PLAN.md` next for the night-of-2026-05-02 progress log.
+
+## Latest changes — 2026-05-03 (afternoon + evening, single session)
+
+### Backend / contract
+
+- **Streaming tokens** — `chat_with_advisor_stream` (async, AsyncAnthropic) shares prompt-building with the sync `chat_with_advisor` via `_build_chat_with_advisor_prompt`. `free_chat` accumulates deltas + yields `token(...)`. Live: TTFT ~1.3s, 11 chunks for a ~580 char reply (was single 6-8s bubble). Banned-phrase regen logged-only on stream.
+- **Smart check-in opener + start_trigger fix** — `flows/checkin.py` has a one-state `opener` flow. `/start` for any user (Telegram-linked OR anonymous-with-chart in `layla_user_records`) emits `typing()` + Starts the checkin flow which runs `generate_checkin_opener` against transits/recent-chat/life-context. Anonymous users no longer re-Start onboarding when they already have a chart.
+- **Chart image as data URL** — WS + HTTP adapter `_scrub` now base64-encodes raw image bytes into `payload.image_data_url`. Onboarding's `save_chart` emits the chart PNG for *all* users (was Telegram-only). Verified: 541KB data URL renders as 1544×1092 in the chat shell.
+- **Voice on mobile (web + native iOS)** — new `POST /v1/voice` endpoint runs the manifest's `voice_handler` against an uploaded audio blob and returns the transcript. Mobile's `useVoiceRecorder()` hook uses `expo-audio` for native (RecordingPresets.HIGH_QUALITY, file URI fetched as Blob) and falls back to MediaRecorder on web. Mic button in Composer toggles recording → upload → send transcript over WS.
+- **Voice-tagged free chat** — `InboundMessage.voice_origin` flag (new). WS frame can carry `voice_origin: true`; mobile sets it after transcription. `free_chat` passes `voice_message=voice_origin` to `chat_with_advisor_stream` so Layla flips to her warmer voice-note persona (instruction is "lead with acknowledgment before insight, match the intimacy of someone speaking aloud").
+- **City retype path** — `flows/onboarding.py` extracted geocode+route into `_route_place_query`. The picker now appends a "✏️ Different city" / "✏️ עיר אחרת" option that returns to `got_place`. Free-text in `disambiguate_place` that doesn't match a candidate is treated as a new geocode query (handles typos: "Sprigfield" → wrong matches → user types "Tel Aviv" → fresh search).
+- **Chat regex layers ported** (handlers/chat.py → free_chat) — invite-intent, update-notes (2-turn pattern via `session.data["pending_notes_for"]`), new-person mention CTA. Telegram-linked users only (the underlying tables are FK'd to `layla_users.user_id BIGINT`). Mobile/web users skip these — they're not yet meaningful without Telegram-side invite redemption. Add-person CTA emits a `quick_replies(["/addperson"])` chip after the streamed reply. `awaiting_settings_city` is still NOT ported (settings flow is still on the legacy path).
+- **Anonymous → Apple linking** — `Storage.link_identity(provider, external_id, target_user_id)` added to the protocol; PostgresStorage + MemoryStorage both implement. `/v1/auth/apple` with `link_anonymous_user_id` now binds the Apple identity to the existing internal_user_id (was a TODO). Settings screen has a "Sign in with Apple to keep your data" row when provider is anonymous and Apple Sign-In is available on the device.
+- **Telegram → iOS link via `/link <code>`** — NOT yet built. Logged as a follow-up in tasks. Needs a code store + a `/link` command on the Telegram side. Lower priority because the common case for App Store launch is fresh iOS users, not Telegram migrants.
+
+### Cutover assets (production swap NOT run)
+
+- `Dockerfile.botella` — uvicorn entry for `bot_botella:app`, `EXPOSE 8000`, `--proxy-headers`. Production `Dockerfile` (PTB polling) is untouched.
+- `CUTOVER.md` — full runbook from creating the `botella-staging` Neon branch through Telegram webhook setup, validation, and the production swap. Two `SIGNOFF GATE` markers — pre-staging-create and pre-prod-swap — and a rollback plan.
+- Northflank API token verified (read-only call on the GombiBot project succeeds). All write actions on Northflank/Neon/Telegram require user signoff.
+
+### Test status
+
+- botella: 64 passing.
+- GombiStar: 120 passing (added 2 tests for city-retype paths).
+- Type-check clean: layla-app + mobile-template.
 
 ---
 
@@ -58,8 +84,8 @@ To restart any of those: `lsof -nP -iTCP:<port> -sTCP:LISTEN | awk 'NR>1 {print 
 - `free_chat` for anonymous users had `chat_history=[]` → after the teaser said "We'll start with your Sun", user's "ok" → Claude pivoted to generic "What's on your mind?" with no continuity. Now seeds `chat_history` in onboarding's `Done(carry=...)` and persists turns into `layla_user_records.data.chat_history` (last 20 turns).
 
 **What's deferred / known TODOs:**
-- Streaming tokens — Claude responses arrive as one ~200-word bubble after 6-8s. The most awkward beat in the flow. Switching to token-by-token streaming would be the single biggest perceived-quality win.
-- Real "welcome back" — if a returning user reloads, the greeting is generic. Production has `generate_checkin_opener` that produces a transit-aware opener. Not wired into `start_trigger` yet.
+- ~~Streaming tokens~~ — DONE 2026-05-03 afternoon. See "Latest changes" at the top.
+- Real "welcome back" — if a returning user reloads, the greeting is generic. Production has `generate_checkin_opener` that produces a transit-aware opener. Not wired into `start_trigger` yet. Related: `start_trigger` re-Starts onboarding for any anonymous user without a Postgres-side chart, even if they already have one in `layla_user_records` (Mira's session got stuck in `got_lang` after /start). Should consult the records-table chart before re-onboarding.
 - Voice messages on mobile — server's `voice_handler` is wired (`services/transcribe.py`); mobile-side `expo-av` recorder + multipart upload UI is the missing half. ~half day.
 - Account linking — anonymous → Apple, Telegram → Apple, Telegram → iOS via `/link <code>`. Without this, existing Telegram users can't keep their data on iOS.
 - Cutover deploy — `bot_botella.py` running locally needs to become production. Plan: `laylabot-staging` Northflank service against a Neon branch, validate, then swap.
@@ -489,26 +515,21 @@ DONE since the overnight session:
 
 OPEN — ranked (recommended order):
 
-1. **Streaming tokens.** Layla currently lands as one ~200-word bubble after 6-8s. The single biggest perceived-quality win. `chat_with_advisor` returns the full string today; need to either:
-   (a) switch the Anthropic SDK call to `client.messages.stream(...)` and yield `token()` events from `free_chat`, OR
-   (b) split chat_with_advisor into a streaming wrapper that does the same work and yields tokens.
-   The chat-shell already handles `token` events token-by-token (echo_bot proves it). Backend side: ~1 hour. Visual upgrade: huge.
+1. **Real welcome-back / smart check-in + start_trigger fix.** Returning users currently get a generic "Welcome back, {name}." worse: anonymous users with a chart in `layla_user_records` re-enter onboarding because `start_trigger` only checks the Postgres-DAL chart (telegram-linked path). Two-part fix: (a) `start_trigger` should consult `storage.get_user(user_id)` for `natal_chart` before deciding to re-onboard. (b) Wire `services.claude_service.generate_checkin_opener` (transit-aware) for users with an existing chart.
 
-2. **Real welcome-back / smart check-in.** Returning users currently get a generic "Welcome back, {name}." Production has `services.claude_service.generate_checkin_opener` that takes transits + recent chat + life_context and produces a transit-aware opener. Wire it into `start_trigger` in `botella_manifest.py` for users with an existing chart.
+2. **Voice messages on mobile.** Server's `voice_handler` is ready. Mobile-side `expo-av` recorder + multipart upload UI is missing. ~half day. Layla is supposed to feel like talking to a person; voice unlocks that.
 
-3. **Voice messages on mobile.** Server's `voice_handler` is ready. Mobile-side `expo-av` recorder + multipart upload UI is missing. ~half day. Layla is supposed to feel like talking to a person; voice unlocks that.
+3. **Cutover to staging.** Stand up `laylabot-staging` on Northflank, point at a separate Neon branch, deploy `bot_botella.py`, set Telegram webhook URL, validate end-to-end including the `mcp/test_newchart_flow.py` Telethon test against the staging bot. Then swap `laylabot` when calm.
 
-4. **Cutover to staging.** Stand up `laylabot-staging` on Northflank, point at a separate Neon branch, deploy `bot_botella.py`, set Telegram webhook URL, validate end-to-end including the `mcp/test_newchart_flow.py` Telethon test against the staging bot. Then swap `laylabot` when calm.
+4. **Port chat-handler regex layers.** `handlers/chat.py` has invite-intent / name-recognition / update-notes detection that the manifest's `free_chat` doesn't have. Current Telegram production has these; cutover loses them without porting. ~1 day.
 
-5. **Port chat-handler regex layers.** `handlers/chat.py` has invite-intent / name-recognition / update-notes detection that the manifest's `free_chat` doesn't have. Current Telegram production has these; cutover loses them without porting. ~1 day.
+5. **Account linking.** Anonymous → Apple, Telegram → iOS via `/link <code>`. ~1 day. Important before announcing the iOS app to existing Telegram users.
 
-6. **Account linking.** Anonymous → Apple, Telegram → iOS via `/link <code>`. ~1 day. Important before announcing the iOS app to existing Telegram users.
+6. **App icon + splash.** Still Echo template defaults. Designer task; can scaffold a placeholder gold-on-twilight L. ~30 min for a stopgap.
 
-7. **App icon + splash.** Still Echo template defaults. Designer task; can scaffold a placeholder gold-on-twilight L. ~30 min for a stopgap.
+7. **App Store Connect setup.** Apple Developer account ($99/yr) → bundle id `app.layla.ios` → EAS Build → TestFlight. User-only, blocked on the Apple Dev enrollment.
 
-8. **App Store Connect setup.** Apple Developer account ($99/yr) → bundle id `app.layla.ios` → EAS Build → TestFlight. User-only, blocked on the Apple Dev enrollment.
-
-9. **save_natal_chart orphan rows.** Known data hygiene; `ON CONFLICT DO NOTHING` doesn't fire because no unique constraint. Not user-visible.
+8. **save_natal_chart orphan rows.** Known data hygiene; `ON CONFLICT DO NOTHING` doesn't fire because no unique constraint. Not user-visible.
 
 ## 14. References
 

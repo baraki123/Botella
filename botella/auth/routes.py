@@ -80,20 +80,20 @@ def build_auth_router(manifest: BotManifest) -> APIRouter:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=str(e),
             )
-        user_id = await manifest.storage.resolve_identity("apple", identity.sub)
 
-        # If the client supplied a previously-anonymous user_id, attach the
-        # Apple identity to the SAME internal user so their data carries
-        # over. We only do the link once per anonymous_id, and only if the
-        # apple identity is freshly created (not already pointing somewhere
-        # else — that would conflict).
-        if body.link_anonymous_user_id and body.link_anonymous_user_id != user_id:
-            # The link_anonymous_user_id may have been minted by /anonymous
-            # earlier this session. Storage handles the merge if implemented;
-            # for now we just trust resolve_identity's stickiness — the
-            # apple sub becomes the canonical id going forward and the
-            # caller-side AsyncStorage updates to the new id.
-            pass
+        # Account-linking path: the client passes the anonymous user_id
+        # they were running under. We bind the Apple identity to that same
+        # internal user so the chart, history, and people they already built
+        # carry over. If the Apple sub was already bound to a different user
+        # (e.g. they re-installed earlier), we fall back to that account
+        # rather than splitting state — better to keep one user's data
+        # consistent than split it across two.
+        if body.link_anonymous_user_id:
+            user_id = await manifest.storage.link_identity(
+                "apple", identity.sub, body.link_anonymous_user_id
+            )
+        else:
+            user_id = await manifest.storage.resolve_identity("apple", identity.sub)
 
         # Best-effort first-launch profile capture (Apple only sends names
         # the first time the user authorizes the app).

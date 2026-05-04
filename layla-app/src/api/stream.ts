@@ -9,8 +9,16 @@ import type { BotEvent } from "./types";
 
 type EventHandler = (event: BotEvent) => void;
 
+export interface OutboundFrame {
+  text?: string;
+  callback_data?: string;
+  /** True iff this text came from a voice transcription (so the server flips
+   * Layla's warmer voice-note persona). */
+  voice_origin?: boolean;
+}
+
 export interface StreamClient {
-  send(message: { text?: string; callback_data?: string }): void;
+  send(message: OutboundFrame): void;
   close(): void;
   onEvent(fn: EventHandler): () => void;
   onStatus(fn: (status: "connecting" | "open" | "closed") => void): () => void;
@@ -30,7 +38,7 @@ export function connectStream(jwt: string): StreamClient {
   let closed = false;
   let backoff = 500;
   // Messages typed while WS is connecting / dropped — flushed when it opens.
-  const outbox: Array<{ text?: string; callback_data?: string }> = [];
+  const outbox: OutboundFrame[] = [];
 
   const emitStatus = (s: "connecting" | "open" | "closed") => {
     for (const fn of statusListeners) fn(s);

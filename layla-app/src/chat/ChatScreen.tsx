@@ -13,6 +13,11 @@ import type { BotEvent } from "../api/types";
 import { ensureSession, type Session } from "../auth/anonymous";
 import { product } from "../config/product";
 import { theme } from "../config/theme";
+import {
+  recorderAvailable,
+  transcribe,
+  useVoiceRecorder,
+} from "../voice/recorder";
 import { Bubble } from "./Bubble";
 import { Composer } from "./Composer";
 import { QuickReplies } from "./QuickReplies";
@@ -40,6 +45,9 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const streamingIdRef = useRef<string | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
   const startedRef = useRef(false);
+  const voice = useVoiceRecorder();
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
 
   // 1. Bootstrap session.
   useEffect(() => {
@@ -153,6 +161,26 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
         return;
       }
 
+      case "media": {
+        // Inline image (e.g. natal chart PNG). Server scrubs raw bytes into
+        // a base64 data URL on `image_data_url`; older payloads may carry
+        // `image_url` directly.
+        setShowTyping(false);
+        const url =
+          event.payload.image_data_url || event.payload.image_url || "";
+        if (!url) return;
+        setMessages((m) => [
+          ...m,
+          {
+            id: uid(),
+            role: "bot",
+            text: event.payload.caption || "",
+            imageUrl: url,
+          },
+        ]);
+        return;
+      }
+
       case "turn_end":
         setShowTyping(false);
         return;
@@ -162,17 +190,45 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
         return;
 
       default:
-        // media, future event types — ignore for the demo
         return;
     }
   }
 
-  function send(text: string) {
+  function send(text: string, opts?: { voice?: boolean }) {
     // Always render the user's message immediately. The StreamClient queues
     // the wire-send if the WS isn't open and flushes on reconnect, so the
     // user never has to wonder whether their message went through.
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
-    streamRef.current?.send({ text });
+    streamRef.current?.send({ text, voice_origin: opts?.voice });
+  }
+
+  async function toggleRecord() {
+    if (transcribing) return;
+    if (!recording) {
+      try {
+        await voice.start();
+        setRecording(true);
+      } catch (e: any) {
+        console.warn("recorder start failed", e?.message || e);
+        setRecording(false);
+      }
+      return;
+    }
+    // Stop → upload → send transcript over WS as a regular text turn.
+    setRecording(false);
+    if (!session) return;
+    setTranscribing(true);
+    try {
+      const blob = await voice.stop();
+      if (!blob || blob.size < 200) return; // empty / accidental tap
+      const text = await transcribe(product.apiUrl, session.jwt, blob);
+      if (!text) return;
+      send(text, { voice: true });
+    } catch (e: any) {
+      console.warn("transcribe failed", e?.message || e);
+    } finally {
+      setTranscribing(false);
+    }
   }
 
   function pickQuickReply(option: string, fromMessageId: string) {
@@ -256,7 +312,14 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
         ListFooterComponent={showTyping ? <TypingIndicator /> : null}
       />
 
-      <Composer onSend={send} status={status} />
+      <Composer
+        onSend={send}
+        status={status}
+        voiceEnabled={recorderAvailable}
+        onToggleRecord={toggleRecord}
+        recording={recording}
+        transcribing={transcribing}
+      />
     </View>
   );
 }
