@@ -26,6 +26,10 @@ interface Props {
   recording?: boolean;
   /** True while the audio is uploading + transcribing. */
   transcribing?: boolean;
+  /** Bottom safe-area inset to clear the home indicator when keyboard is
+   * closed. KeyboardAvoidingView in the parent already handles the rise
+   * when the keyboard appears. */
+  bottomInset?: number;
 }
 
 export function Composer({
@@ -35,6 +39,7 @@ export function Composer({
   onToggleRecord,
   recording,
   transcribing,
+  bottomInset = 0,
 }: Props) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
@@ -58,7 +63,7 @@ export function Composer({
           </Text>
         </View>
       ) : null}
-      <View style={styles.bar}>
+      <View style={[styles.bar, { paddingBottom: 14 + bottomInset }]}>
         <View
           style={[
             styles.inputWrap,

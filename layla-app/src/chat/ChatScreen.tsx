@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { connectStream, type StreamClient } from "../api/stream";
 import type { BotEvent } from "../api/types";
@@ -53,6 +54,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const voice = useVoiceRecorder();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const insets = useSafeAreaInsets();
 
   // 1. Bootstrap session.
   useEffect(() => {
@@ -278,10 +280,6 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
-        // SafeAreaView in App.tsx already eats the iOS top inset, so the
-        // keyboard offset is 0 — no double-counting. Setting it positive
-        // here is what previously left a gap at the bottom on Android-y
-        // devices.
         keyboardVerticalOffset={0}
       >
         <ChatHeader status={status} onOpenSettings={onOpenSettings} />
@@ -314,6 +312,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
           onToggleRecord={toggleRecord}
           recording={recording}
           transcribing={transcribing}
+          bottomInset={insets.bottom}
         />
       </KeyboardAvoidingView>
     </View>

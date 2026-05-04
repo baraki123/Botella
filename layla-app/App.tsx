@@ -1,6 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { ChatScreen } from "./src/chat/ChatScreen";
 import { loadCachedSession, type Session } from "./src/auth/anonymous";
@@ -65,11 +66,17 @@ export default function App() {
     body = <ChatScreen onOpenSettings={() => setRoute("settings")} />;
   }
 
+  // SafeAreaView only owns the TOP edge here. The chat screen owns its own
+  // bottom inset via useSafeAreaInsets so it can hand the right offset to
+  // the KeyboardAvoidingView — otherwise the home-indicator inset gets
+  // double-counted and the iOS QuickType bar covers the input.
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar style="light" />
-      {body}
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.root} edges={["top"]}>
+        <StatusBar style="light" />
+        {body}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
