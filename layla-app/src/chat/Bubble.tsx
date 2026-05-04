@@ -133,8 +133,8 @@ const styles = StyleSheet.create({
   },
   userText: {
     color: theme.bubbleUserText,
-    fontSize: 16,
-    lineHeight: 23,
+    fontSize: 17,
+    lineHeight: 24,
   },
   botRow: {
     flexDirection: "row",
@@ -162,8 +162,8 @@ const styles = StyleSheet.create({
   },
   botText: {
     color: theme.bubbleBotText,
-    fontSize: 17,
-    lineHeight: 26,
+    fontSize: 18,
+    lineHeight: 27,
     letterSpacing: 0.1,
   },
   image: {

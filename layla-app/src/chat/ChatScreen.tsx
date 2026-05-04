@@ -89,10 +89,17 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     streamRef.current?.send({ text: "/start" });
   }, [status]);
 
-  // 4. Auto-scroll on every message change.
+  // 4. Auto-scroll only when a NEW message lands (or typing dots show) —
+  // not on every streaming token. With the old behavior the screen
+  // tracked the bottom of Layla's reply as it grew, so the user only
+  // ever saw the last 2-3 lines of a long answer. Now we scroll once
+  // when the bot bubble first opens (first token bumps messages.length),
+  // then leave the view alone while it streams: short replies fit on
+  // screen and end up fully visible; long replies start at the top,
+  // and the user scrolls down to read the rest.
   useEffect(() => {
     listRef.current?.scrollToEnd({ animated: true });
-  }, [messages, showTyping]);
+  }, [messages.length, showTyping]);
 
   function handleEvent(event: BotEvent) {
     switch (event.type) {
