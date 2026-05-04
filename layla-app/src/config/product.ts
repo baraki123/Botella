@@ -24,11 +24,30 @@ function deriveApiHost(): string {
 }
 
 const PRODUCTION_API_URL = "https://http--laylabot--28ttnydqvqwp.code.run";
-const apiHost = deriveApiHost();
 
 const isProd =
   // EAS build profile sets this; in dev / Expo Go it stays undefined.
   (Constants.expoConfig?.extra as any)?.botellaEnv === "production";
+
+// Resolve the backend URL with this priority:
+//   1. EXPO_PUBLIC_API_URL — manual override (works in Expo Go too).
+//   2. EAS production profile — Northflank URL.
+//   3. iOS / Android native dev → also the Northflank URL. Plain HTTP to a
+//      LAN dev backend would fail iOS App Transport Security ("Network
+//      request failed" on every fetch), so native dev defaults to prod.
+//      To run native against a LOCAL backend, set EXPO_PUBLIC_API_URL or
+//      `npx expo start --tunnel`.
+//   4. Web dev → window.location.hostname:8000, the standard backend-dev
+//      loop on a laptop.
+function resolveApiUrl(): string {
+  const override = (process.env as any).EXPO_PUBLIC_API_URL;
+  if (typeof override === "string" && override.length > 0) return override;
+  if (isProd) return PRODUCTION_API_URL;
+  if (Platform.OS !== "web") return PRODUCTION_API_URL;
+  const host =
+    typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
+  return `http://${host}:8000`;
+}
 
 export const product = {
   name: "Layla",
@@ -37,7 +56,7 @@ export const product = {
   // GombiStar/locales/strings.py "welcome".
   greeting:
     "I'm Layla. Tell me when you were born and I'll see what I see — then bring me whatever's actually on your mind.",
-  apiUrl: isProd ? PRODUCTION_API_URL : `http://${apiHost}:8000`,
+  apiUrl: resolveApiUrl(),
   accent: "#D4A574", // warm gold — used for Layla's signature touches
 } as const;
 
