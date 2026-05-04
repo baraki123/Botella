@@ -40,6 +40,13 @@ class AuthResponse(BaseModel):
     auth: str
 
 
+class LinkRedeemRequest(BaseModel):
+    """Body iOS posts to claim ownership of an existing account on another
+    transport. The user typed `code` after triggering /link on Telegram.
+    """
+    code: str = Field(..., min_length=4, max_length=32)
+
+
 def build_account_router(manifest: BotManifest) -> APIRouter:
     """/v1/account — sign-out is client-side (drop the JWT). Account deletion
     is server-side because App Store 5.1.1(v) requires apps with account
@@ -51,6 +58,39 @@ def build_account_router(manifest: BotManifest) -> APIRouter:
         user_id = current_user_id_from_header(authorization)
         await manifest.storage.delete_user(user_id)
         return None
+
+    @router.post("/link/redeem", response_model=AuthResponse)
+    async def redeem_link_code(
+        body: LinkRedeemRequest,
+        authorization: str = Header(default=None),
+    ) -> AuthResponse:
+        """Redeem a one-time code minted by /link on the bot's other
+        transport. On success the caller's identities are re-pointed at the
+        target user; we mint a new JWT so the client switches to that
+        identity immediately. Source-side per-user data is dropped — the
+        destination owns history, chart, etc."""
+        if manifest.link_code_resolver is None:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="link redemption not configured for this bot",
+            )
+
+        current_user_id = current_user_id_from_header(authorization)
+        target_user_id = await manifest.link_code_resolver(body.code.strip())
+        if target_user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid or expired code",
+            )
+
+        if target_user_id != current_user_id:
+            await manifest.storage.merge_users(current_user_id, target_user_id)
+
+        return AuthResponse(
+            jwt=mint_jwt(target_user_id, "linked"),
+            user_id=target_user_id,
+            auth="linked",
+        )
 
     return router
 

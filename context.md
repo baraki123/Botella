@@ -1,8 +1,8 @@
 # botella — handoff
 
 > A fresh Claude session can read this top-to-bottom and pick up the work
-> cold. Last updated 2026-05-04, post-cutover. If anything below disagrees
-> with the running system, trust the system and update this file.
+> cold. Last updated 2026-05-04 (afternoon work block). If anything below
+> disagrees with the running system, trust the system and update this file.
 
 ---
 
@@ -37,12 +37,19 @@ shipped:
 **Code live in production = `main` branch of GombiStar at HEAD `55d768f`**
 (as of cutover). Auto-deploys on push to `main`.
 
+**Shipped 2026-05-04 afternoon (this batch — code in repo, NOT YET DEPLOYED):**
+- `PRODUCTION_API_URL` set to the Northflank URL in `layla-app/src/config/product.ts`
+- `layla_natal_charts` UNIQUE(user_id) added to schema; migration in `database/migrations/2026_05_04_natal_charts_unique.sql` (run against Neon manually)
+- Settings ported to botella: new `flows/settings.py` with menu/lang/gender/city sub-states; `/settings` trigger added; `awaiting_settings_city` regex layer removed (the city sub-state captures the next text turn natively)
+- Telegram → iOS `/link <code>` flow: new `layla_link_codes` table (migration in `database/migrations/2026_05_04_link_codes.sql`), `/link` trigger mints codes, `POST /v1/account/link/redeem` endpoint redeems, `Storage.merge_users` re-points identities and drops source data, Settings has a "Link Telegram account" row with input
+- Daily reading scheduler revived under `bot_botella.py` startup hook (was off since cutover): `services/daily_runner.py` fans out to Telegram via the PTB Bot AND to iOS via Expo push for users who registered a token. Disable in dev with `LAYLA_DISABLE_SCHEDULER=1`.
+- iOS push registration: `src/push/registerPush.ts` + `App.tsx` calls it on session change. Native deps not yet installed — see "Not yet shipped" below.
+- Icon + splash + adaptive + favicon regenerated with a Layla-branded mark (italic gold serif L + sparkle on dusk purple)
+
 **Not yet shipped:**
-- Telegram → iOS link via `/link <code>` (the C4 follow-up)
-- App icon + splash (still Echo template defaults in `layla-app/assets/`)
+- Migrations not yet applied to Neon (`2026_05_04_natal_charts_unique.sql`, `2026_05_04_link_codes.sql`) — run manually then deploy
+- iOS push native deps not installed — `cd layla-app && npx expo install expo-notifications expo-device` before the next EAS build, otherwise `registerForPushNotifications` resolves "expo-notifications-not-installed" silently
 - App Store Connect / EAS Build / TestFlight (blocked on $99 Apple Dev enrollment)
-- `save_natal_chart` orphan-rows hygiene (`ON CONFLICT DO NOTHING` doesn't fire — no unique constraint)
-- `awaiting_settings_city` regex layer (still on legacy path; Settings flow isn't ported yet)
 
 ---
 
@@ -438,14 +445,12 @@ cd ~/Desktop/Coding/botella && source venv/bin/activate && python -m pytest -q
 
 | # | Item | Size | Notes |
 |---|------|------|-------|
-| 1 | **Telegram → iOS link via `/link <code>`** | ~1 day | New `layla_link_codes` table (or in-mem TTL) + `/link` command. For migrating existing Telegram users to iOS. Lower priority because the iOS launch will mostly hit fresh users. |
-| 2 | **App icon + splash** | ~30 min stopgap, more for a real designer pass | Currently Echo template defaults in `layla-app/assets/`. Required for App Store screenshots. |
-| 3 | **App Store Connect / EAS Build / TestFlight** | user-only | Blocked on $99 Apple Dev account enrollment. Once enrolled: bundle id `app.layla.ios`, eas.json profiles already in repo. |
-| 4 | **`save_natal_chart` orphan rows** | ~30 min | `ON CONFLICT DO NOTHING` doesn't fire because no unique constraint. Not user-visible. |
-| 5 | **Port `awaiting_settings_city` regex layer** | ~1h | Last layer not ported in `free_chat`. Settings flow itself isn't moved to botella yet, so this layer is dead weight; port both together. |
-| 6 | **Move Northflank to a us-east cluster** | ~30 min | Drops Neon round-trip from ~30ms to <5ms. Has to be a service recreate (no in-place region change). Do at the next staging-needed moment. |
-| 7 | **Update layla-app `PRODUCTION_API_URL`** | ~5 min | `src/config/product.ts` still has `PRODUCTION_API_URL = ""`. Set to `https://http--laylabot--28ttnydqvqwp.code.run` so production builds know where to talk. |
-| 8 | **Push notifications wiring** | ~1 day | `botella/push.py` exists with `proactive_send`. Layla's `send_daily_readings` cron isn't wired through it yet — morning-reading is dark on iOS. |
+| A | **Apply Neon migrations + deploy** | ~10 min | `psql $DATABASE_URL -f database/migrations/2026_05_04_natal_charts_unique.sql` and `…/2026_05_04_link_codes.sql`. Then `git push` to trigger Northflank rebuild. Without the migration the `/link` flow throws on first redeem and `save_natal_chart` keeps inserting duplicates. |
+| B | **Install Expo push native deps** | ~5 min | `cd layla-app && npx expo install expo-notifications expo-device`. Until done, native iOS builds register no token and morning push is dark on the App Store. |
+| C | **App Store Connect / EAS Build / TestFlight** | user-only | Blocked on $99 Apple Dev account enrollment. Once enrolled: bundle id `app.layla.ios`, eas.json profiles already in repo. |
+| D | **Real icon designer pass** | TBD | The 2026-05-04 stopgap (italic gold L + sparkle) is fine for TestFlight; replace before public submission. |
+| E | **Move Northflank to a us-east cluster** | ~30 min | Drops Neon round-trip from ~30ms to <5ms. Has to be a service recreate. Do at the next staging-needed moment. |
+| F | **Anonymous-iOS users get morning push too** | ~half day | Current daily runner only iterates `layla_users` (Telegram-keyed). Pure-anonymous users with a chart in `layla_user_records.data.natal_chart` get nothing until they /link or sign in with Apple. Either backfill them into `layla_users`, or fork a parallel runner over `layla_user_records`. |
 
 ---
 

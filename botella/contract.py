@@ -268,8 +268,29 @@ class Storage(Protocol):
         """
         ...
 
+    async def merge_users(self, from_user_id: str, to_user_id: str) -> None:
+        """Re-point all identity rows from `from_user_id` to `to_user_id`,
+        then drop `from_user_id`'s session + per-user record. Used when a
+        user proves ownership of an existing account on another transport
+        (e.g. an iOS-anonymous user redeeming a Telegram /link code that
+        ties them to their Telegram-side account).
+
+        Convention: the destination's data is authoritative. Source-side
+        data is dropped, not merged — by the time a user is linking they
+        already chose which side has the canonical history. Implementations
+        should be idempotent and safely no-op if `from_user_id` doesn't
+        exist.
+        """
+        ...
+
 
 # ─── Manifest ────────────────────────────────────────────────────────────────
+
+
+LinkCodeResolver = Callable[[str], Awaitable[str | None]]
+"""Resolves a redeemable link code to the internal_user_id it was minted
+for. Returns None if the code is unknown, expired, or already used.
+Implementations are expected to mark the code consumed before returning."""
 
 
 @dataclass
@@ -281,6 +302,7 @@ class BotManifest:
     triggers: dict[str, StateFn] = field(default_factory=dict)
     free_chat: FreeChatFn | None = None
     voice_handler: VoiceFn | None = None
+    link_code_resolver: LinkCodeResolver | None = None
     config: dict[str, Any] = field(default_factory=dict)
 
     def flow_by_name(self, name: str) -> Flow:

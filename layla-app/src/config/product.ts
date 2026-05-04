@@ -23,7 +23,7 @@ function deriveApiHost(): string {
   return "localhost";
 }
 
-const PRODUCTION_API_URL = "https://api.layla.app";
+const PRODUCTION_API_URL = "https://http--laylabot--28ttnydqvqwp.code.run";
 const apiHost = deriveApiHost();
 
 const isProd =

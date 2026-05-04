@@ -16,6 +16,8 @@
     "expo-audio": "~1.1.1",
     "expo-constants": "~18.0.13",
     "expo-crypto": "~15.0.9",
+    "expo-device": "~8.0.10",
+    "expo-notifications": "~0.32.17",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",

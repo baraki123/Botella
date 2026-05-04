@@ -95,3 +95,21 @@ class MemoryStorage:
             self._identities = {
                 k: v for k, v in self._identities.items() if v != user_id
             }
+
+    async def merge_users(self, from_user_id: str, to_user_id: str) -> None:
+        if from_user_id == to_user_id:
+            return
+        async with self._lock:
+            new_identities: dict[tuple[str, str], str] = {}
+            for key, uid in self._identities.items():
+                if uid != from_user_id:
+                    new_identities[key] = uid
+                    continue
+                # Re-point unless `to_user_id` already owns the same key.
+                if new_identities.get(key) == to_user_id:
+                    continue
+                new_identities[key] = to_user_id
+            self._identities = new_identities
+            self._sessions.pop(from_user_id, None)
+            self._users.pop(from_user_id, None)
+            self._users.setdefault(to_user_id, {})

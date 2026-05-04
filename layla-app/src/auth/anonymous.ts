@@ -70,6 +70,13 @@ export async function ensureSession(): Promise<Session> {
   return { jwt: body.jwt, userId: body.user_id };
 }
 
+export async function saveSession(session: Session): Promise<void> {
+  await Promise.all([
+    AsyncStorage.setItem(JWT_KEY, session.jwt),
+    AsyncStorage.setItem(USER_KEY, session.userId),
+  ]);
+}
+
 export async function clearSession(): Promise<void> {
   await Promise.all([
     AsyncStorage.removeItem(JWT_KEY),

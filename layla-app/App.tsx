@@ -7,6 +7,7 @@ import { loadCachedSession, type Session } from "./src/auth/anonymous";
 import { SignInScreen } from "./src/auth/SignInScreen";
 import { SettingsScreen } from "./src/settings/SettingsScreen";
 import { theme } from "./src/config/theme";
+import { registerForPushNotifications } from "./src/push/registerPush";
 
 type Route = "signin" | "chat" | "settings";
 
@@ -28,6 +29,16 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // Best-effort push registration whenever we have a fresh session — covers
+  // first sign-in, app upgrade (existing user picks up the new permission
+  // flow), and account-link/switch (new JWT registers under the new user).
+  // Failure is silent: the user just won't get morning push.
+  useEffect(() => {
+    if (session) {
+      registerForPushNotifications({ jwt: session.jwt }).catch(() => {});
+    }
+  }, [session?.userId, session?.jwt]);
 
   function handleSignedIn(s: Session) {
     setSession(s);

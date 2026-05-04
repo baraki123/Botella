@@ -19,34 +19,84 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
 import { product } from "../config/product";
 import { theme } from "../config/theme";
-import { clearSession, loadCachedSession } from "../auth/anonymous";
+import { clearSession, loadCachedSession, saveSession } from "../auth/anonymous";
 import {
   appleSignInAvailable,
   currentAuthProvider,
   signInWithApple,
 } from "../auth/apple";
+import { redeemLinkCode } from "../api/link";
 
 const PRIVACY_URL = "https://layla.app/privacy"; // TODO: real URL before submission
 const TERMS_URL = "https://layla.app/terms";
 
 export interface SettingsScreenProps {
   onSignedOut: () => void;
+  onAccountSwitched?: () => void;
 }
 
-export function SettingsScreen({ onSignedOut }: SettingsScreenProps) {
+export function SettingsScreen({ onSignedOut, onAccountSwitched }: SettingsScreenProps) {
   const [provider, setProvider] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"signout" | "delete" | "link" | null>(null);
+  const [busy, setBusy] = useState<
+    "signout" | "delete" | "link" | "tg-link" | null
+  >(null);
   const [canLinkApple, setCanLinkApple] = useState(false);
+  const [tgCode, setTgCode] = useState("");
+  const [tgLinkOpen, setTgLinkOpen] = useState(false);
 
   useEffect(() => {
     currentAuthProvider().then((p) => setProvider(p ?? "anonymous"));
     appleSignInAvailable().then(setCanLinkApple);
   }, []);
+
+  async function handleRedeemTelegramCode() {
+    const code = tgCode.trim();
+    if (code.length < 4) {
+      const msg = "Type the 8-character code from /link in Telegram.";
+      if (Platform.OS === "web") {
+        // @ts-ignore
+        window.alert(msg);
+      } else {
+        Alert.alert("Code too short", msg);
+      }
+      return;
+    }
+    setBusy("tg-link");
+    try {
+      const session = await loadCachedSession();
+      if (!session) throw new Error("not signed in yet");
+      const next = await redeemLinkCode({ jwt: session.jwt, code });
+      await saveSession({ jwt: next.jwt, userId: next.userId });
+      await AsyncStorage.setItem("botella.authProvider", next.auth);
+      setProvider(next.auth);
+      setTgCode("");
+      setTgLinkOpen(false);
+      const ok = "Telegram account linked. Your chart and history are here now.";
+      if (Platform.OS === "web") {
+        // @ts-ignore
+        window.alert(ok);
+      } else {
+        Alert.alert("Linked", ok);
+      }
+      onAccountSwitched?.();
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (Platform.OS === "web") {
+        // @ts-ignore
+        window.alert(`Couldn't link: ${msg}`);
+      } else {
+        Alert.alert("Couldn't link", msg);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function handleLinkApple() {
     setBusy("link");
@@ -150,6 +200,34 @@ export function SettingsScreen({ onSignedOut }: SettingsScreenProps) {
             onPress={handleLinkApple}
             busy={busy === "link"}
           />
+        ) : null}
+        <ActionRow
+          label="Link Telegram account"
+          onPress={() => setTgLinkOpen((v) => !v)}
+        />
+        {tgLinkOpen ? (
+          <View style={styles.linkBox}>
+            <Text style={styles.linkHint}>
+              On Telegram, send /link to @laylastarbot, then type the 8-char
+              code below. Brings your chart and history here.
+            </Text>
+            <TextInput
+              style={styles.linkInput}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder="ABCD2345"
+              placeholderTextColor={theme.textMuted}
+              value={tgCode}
+              onChangeText={(s) => setTgCode(s.toUpperCase())}
+              maxLength={12}
+              editable={busy !== "tg-link"}
+            />
+            <ActionRow
+              label="Redeem code"
+              onPress={handleRedeemTelegramCode}
+              busy={busy === "tg-link"}
+            />
+          </View>
         ) : null}
         <ActionRow
           label="Sign out"
@@ -261,6 +339,31 @@ const styles = StyleSheet.create({
   rowValue: { fontSize: 15, color: theme.text },
   rowAction: { fontSize: 15, color: theme.text },
   destructive: { color: "#C97777" },
+  linkBox: {
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.border,
+    backgroundColor: theme.surface,
+  },
+  linkHint: {
+    fontSize: 13,
+    color: theme.textSubtle,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
+  linkInput: {
+    fontSize: 18,
+    color: theme.text,
+    backgroundColor: theme.bg,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
   footer: {
     color: theme.textMuted,
     fontSize: 12,
