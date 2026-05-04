@@ -2,6 +2,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -216,8 +217,10 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
         await voice.start();
         setRecording(true);
       } catch (e: any) {
-        console.warn("recorder start failed", e?.message || e);
+        const msg = e?.message || String(e);
+        console.warn("recorder start failed", msg);
         setRecording(false);
+        Alert.alert("Couldn't start recording", msg);
       }
       return;
     }
@@ -227,12 +230,30 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     setTranscribing(true);
     try {
       const blob = await voice.stop();
-      if (!blob || blob.size < 200) return; // empty / accidental tap
+      if (!blob) {
+        Alert.alert(
+          "No audio captured",
+          "The recorder ran but produced no audio file. If you're in Expo Go, try a dev-client build — Expo Go's audio module sometimes can't capture on this iOS version.",
+        );
+        return;
+      }
+      if (blob.size < 200) {
+        Alert.alert(
+          "Too short",
+          `Captured ${blob.size} bytes — hold the mic for a beat longer.`,
+        );
+        return;
+      }
       const text = await transcribe(product.apiUrl, session.jwt, blob);
-      if (!text) return;
+      if (!text) {
+        Alert.alert("No transcript", "The audio uploaded but came back empty.");
+        return;
+      }
       send(text, { voice: true });
     } catch (e: any) {
-      console.warn("transcribe failed", e?.message || e);
+      const msg = e?.message || String(e);
+      console.warn("transcribe failed", msg);
+      Alert.alert("Voice transcription failed", msg);
     } finally {
       setTranscribing(false);
     }
