@@ -261,14 +261,15 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     }
   }
 
-  function pickQuickReply(option: string, fromMessageId: string) {
-    // Remove the chips so they can't be tapped twice.
+  function pickQuickReply(value: string, fromMessageId: string) {
+    // Remove the chips so they can't be tapped twice. (URL-form chips
+    // never reach this callback — they open externally via Linking.)
     setMessages((m) =>
       m.map((msg) =>
         msg.id === fromMessageId ? { ...msg, quickReplies: undefined } : msg,
       ),
     );
-    send(option);
+    send(value);
   }
 
   if (authError) {

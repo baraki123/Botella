@@ -296,9 +296,27 @@ async def render_event(
     if event.type == "quick_replies":
         options = event.payload.get("options", [])
         prompt = event.payload.get("prompt") or " "
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(text=opt, callback_data=opt) for opt in options]]
-        )
+        buttons = []
+        for opt in options:
+            if isinstance(opt, dict):
+                label = str(opt.get("label") or opt.get("value") or "")
+                if not label:
+                    continue
+                url = opt.get("url")
+                if url:
+                    buttons.append(InlineKeyboardButton(text=label, url=str(url)))
+                else:
+                    cb = str(opt.get("value") or label)
+                    buttons.append(
+                        InlineKeyboardButton(text=label, callback_data=cb)
+                    )
+            else:
+                buttons.append(
+                    InlineKeyboardButton(text=str(opt), callback_data=str(opt))
+                )
+        if not buttons:
+            return
+        keyboard = InlineKeyboardMarkup([buttons])
         try:
             await bot.send_message(
                 chat_id=chat_id,

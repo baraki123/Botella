@@ -82,7 +82,20 @@ def complete(full_text: str = "") -> OutboundEvent:
     return OutboundEvent("complete", {"text": full_text})
 
 
-def quick_replies(options: list[str], prompt: str = "") -> OutboundEvent:
+def quick_replies(
+    options: list[str | dict[str, Any]],
+    prompt: str = "",
+) -> OutboundEvent:
+    """A row of tappable chips/buttons. Options can be:
+
+    - a plain string  → tapping sends that string back as a user message.
+    - a dict with `label` + `url` → tapping opens the URL externally
+      (Telegram renders an InlineKeyboardButton(url=…); iOS uses
+      Linking.openURL). Useful for share links (wa.me, t.me/share, …).
+    - a dict with `label` + `value` → tapping sends `value` back
+      (lets the bot show user-friendly labels while keeping a stable token
+      in the resulting callback_data / message text).
+    """
     return OutboundEvent("quick_replies", {"options": options, "prompt": prompt})
 
 
