@@ -229,22 +229,24 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     if (!session) return;
     setTranscribing(true);
     try {
-      const blob = await voice.stop();
-      if (!blob) {
+      const source = await voice.stop();
+      if (!source) {
         Alert.alert(
           "No audio captured",
-          "The recorder ran but produced no audio file. If you're in Expo Go, try a dev-client build — Expo Go's audio module sometimes can't capture on this iOS version.",
+          "The recorder ran but produced no audio file.",
         );
         return;
       }
-      if (blob.size < 200) {
+      const size =
+        source.kind === "blob" ? source.blob.size : source.size;
+      if (size > 0 && size < 200) {
         Alert.alert(
           "Too short",
-          `Captured ${blob.size} bytes — hold the mic for a beat longer.`,
+          `Captured ${size} bytes — hold the mic for a beat longer.`,
         );
         return;
       }
-      const text = await transcribe(product.apiUrl, session.jwt, blob);
+      const text = await transcribe(product.apiUrl, session.jwt, source);
       if (!text) {
         Alert.alert("No transcript", "The audio uploaded but came back empty.");
         return;

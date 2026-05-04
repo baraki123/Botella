@@ -15,9 +15,15 @@ import {
   useAudioRecorder,
 } from "expo-audio";
 
+/** Native uploads use the file URI directly; web uploads a Blob captured
+ *  from MediaRecorder. The transcribe() helper accepts either. */
+export type AudioSource =
+  | { kind: "blob"; blob: Blob }
+  | { kind: "file"; uri: string; mime: string; size: number };
+
 export interface VoiceRecorderHandle {
   start(): Promise<void>;
-  stop(): Promise<Blob | null>;
+  stop(): Promise<AudioSource | null>;
   cancel(): void;
 }
 
@@ -77,7 +83,7 @@ export function useVoiceRecorder(): VoiceRecorderHandle {
     recorder.record();
   }, [recorder]);
 
-  const stop = useCallback(async (): Promise<Blob | null> => {
+  const stop = useCallback(async (): Promise<AudioSource | null> => {
     if (Platform.OS === "web") {
       const ctx = webRef.current;
       if (!ctx) return null;
@@ -89,7 +95,8 @@ export function useVoiceRecorder(): VoiceRecorderHandle {
         };
       });
       if (ctx.recorder.state !== "inactive") ctx.recorder.stop();
-      return await done;
+      const blob = await done;
+      return { kind: "blob", blob };
     }
 
     await recorder.stop();
@@ -100,10 +107,32 @@ export function useVoiceRecorder(): VoiceRecorderHandle {
     );
     const uri = recorder.uri;
     if (!uri) return null;
-    // expo-audio gives us a file:// URI on native; fetch reads it as a Blob
-    // so the upload path is the same as web.
-    const resp = await fetch(uri);
-    return await resp.blob();
+    // Hand the URI to the upload directly — converting via fetch(uri) →
+    // .blob() causes RN's Hermes fetch to send an empty multipart body on
+    // iOS in late 2025. Pass {uri, type, name} into FormData instead.
+    // expo-audio's HIGH_QUALITY preset writes m4a (AAC) on iOS.
+    const lower = uri.toLowerCase();
+    const mime = lower.endsWith(".m4a")
+      ? "audio/m4a"
+      : lower.endsWith(".caf")
+      ? "audio/x-caf"
+      : lower.endsWith(".wav")
+      ? "audio/wav"
+      : "audio/m4a";
+    let size = 0;
+    try {
+      const head = await fetch(uri);
+      size = parseInt(head.headers.get("content-length") || "0", 10) || 0;
+      // Fall back to reading the body length if the local "server" doesn't
+      // surface content-length (some RN versions don't).
+      if (!size) {
+        const ab = await head.arrayBuffer();
+        size = ab.byteLength;
+      }
+    } catch {
+      size = 0;
+    }
+    return { kind: "file", uri, mime, size };
   }, [recorder]);
 
   const cancel = useCallback(() => {
@@ -125,15 +154,28 @@ export function useVoiceRecorder(): VoiceRecorderHandle {
   return { start, stop, cancel };
 }
 
-/** Upload a recorded blob to /v1/voice and return the transcript. */
+/** Upload a recorded source (web Blob OR native file URI) to /v1/voice and
+ *  return the transcript. */
 export async function transcribe(
   apiUrl: string,
   jwt: string,
-  audio: Blob,
+  source: AudioSource,
 ): Promise<string> {
   const fd = new FormData();
-  const ext = (audio.type.split("/")[1] || "webm").split(";")[0];
-  fd.append("audio", audio, `voice.${ext}`);
+  if (source.kind === "blob") {
+    const ext = (source.blob.type.split("/")[1] || "webm").split(";")[0];
+    fd.append("audio", source.blob, `voice.${ext}`);
+  } else {
+    // RN multipart shape: append the {uri, type, name} object directly so
+    // RN's fetch reads the file off disk. Passing a Blob here goes through
+    // a Hermes path that sends an empty body on iOS.
+    const ext = (source.mime.split("/")[1] || "m4a").split(";")[0];
+    fd.append("audio", {
+      uri: source.uri,
+      type: source.mime,
+      name: `voice.${ext}`,
+    } as any);
+  }
   const r = await fetch(`${apiUrl}/v1/voice`, {
     method: "POST",
     headers: { Authorization: `Bearer ${jwt}` },
