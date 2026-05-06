@@ -88,11 +88,18 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   // Per-message rendered height (keyed by message id) + the FlatList's
   // viewport height. Used to decide where to scroll when a new bot
   // message arrives: short message → bottom (sticky); tall message
-  // (won't fit) → align its TOP to the viewport top so the user reads
-  // from the start instead of landing in the middle/end.
+  // (won't fit comfortably) → align its TOP to the viewport top so the
+  // user reads from the start instead of landing in the middle/end.
   const messageHeightsRef = useRef<Map<string, number>>(new Map());
   const listHeightRef = useRef(0);
+  // Track the message we last anchored AND the height at the moment of
+  // anchor. Markdown rendering can fire onLayout multiple times as text
+  // children settle, and the FIRST measurement may be smaller than the
+  // final one — if we memoize the early decision based on a small height,
+  // we miss that the message is actually too tall to fit. So we re-anchor
+  // when a later layout reveals significantly more height.
   const lastAnchoredIdRef = useRef<string | null>(null);
+  const lastAnchoredHeightRef = useRef(0);
   // Mirror of `messages` state so the height-callback can read the
   // current array without going stale across renders.
   const messagesRef = useRef<Message[]>([]);
@@ -162,26 +169,41 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const recordMessageHeight = useCallback((id: string, height: number) => {
     messageHeightsRef.current.set(id, height);
     if (userOverrideRef.current) return;
-    if (lastAnchoredIdRef.current === id) return;
     const arr = messagesRef.current;
     const last = arr[arr.length - 1];
     if (!last || last.id !== id) return;
     if (last.role === "user") return;       // user bubbles always sticky-bottom
     if (last.streaming) return;             // wait for streaming to finish
+
+    // If we already anchored for this id, skip — UNLESS the rendered
+    // height has grown significantly since then (markdown reflows can
+    // arrive in multiple passes; the first measurement is sometimes
+    // before all children have laid out). 60px is roughly two body
+    // lines — enough to flip a "fits" decision into "anchor top".
+    if (
+      lastAnchoredIdRef.current === id
+      && height <= lastAnchoredHeightRef.current + 60
+    ) {
+      return;
+    }
+
     const viewH = listHeightRef.current;
-    if (viewH > 0 && height > viewH * 0.85) {
-      // Too tall to fit — anchor message top to viewport top so the
-      // user reads from the start.
+    // Threshold: anything taking up more than ~half the viewport is
+    // tall enough that the user wants to read it top-down, not have it
+    // dropped at the bottom of the list. This catches typical chapter
+    // sections (200–400px on a phone), which would otherwise sticky-
+    // bottom and force the user to scroll up to the start.
+    if (viewH > 0 && height > viewH * 0.5) {
       listRef.current?.scrollToIndex({
         index: arr.length - 1,
         viewPosition: 0,
         animated: true,
       });
     } else {
-      // Fits — keep current sticky-bottom behaviour.
       listRef.current?.scrollToEnd({ animated: true });
     }
     lastAnchoredIdRef.current = id;
+    lastAnchoredHeightRef.current = height;
   }, []);
 
   const handleListLayout = useCallback((e: LayoutChangeEvent) => {
