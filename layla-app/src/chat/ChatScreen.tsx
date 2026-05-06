@@ -188,13 +188,21 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     listHeightRef.current = e.nativeEvent.layout.height;
   }, []);
 
-  // The most recent bot message that still has chips attached. Rendered
-  // in a sticky row above the Composer so the keyboard never hides it
-  // and so a long bubble doesn't leave the chips off-screen.
+  // The chips that are CURRENTLY actionable, rendered in a sticky row
+  // above the Composer.
+  //
+  // Rule: chips only show when the most recent message in the chat is
+  // a bot message with chips attached. Once the user replies (their
+  // message becomes latest) or another bot text lands without chips,
+  // the chips are conceptually superseded and we hide them. Searching
+  // backward for the last message-with-chips was wrong — it kept stale
+  // chips visible after /reset, after the user typed something new,
+  // and across other "the chips don't apply anymore" transitions.
   const latestChipMessage = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.quickReplies && m.quickReplies.length > 0) return m;
+    if (messages.length === 0) return null;
+    const last = messages[messages.length - 1];
+    if (last.role === "bot" && last.quickReplies && last.quickReplies.length > 0) {
+      return last;
     }
     return null;
   }, [messages]);
