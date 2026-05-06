@@ -104,12 +104,20 @@ export function ImageLightbox({ uri, onClose }: Props) {
       const ts = Date.now();
       const filename = `layla-chart-${ts}.png`;
 
-      let bytes: Uint8Array | null = null;
-      let b64: string | null = null;
+      // Resolve to a Uint8Array — the native File.write binding takes a
+      // single argument. The TS types document a (content, options)
+      // signature but the runtime binding rejects it with "received 2
+      // arguments but 1 was expected", so we decode base64 in JS and
+      // pass the bytes directly.
+      let bytes: Uint8Array;
       if (sourceUri.startsWith("data:")) {
         const comma = sourceUri.indexOf(",");
-        b64 = comma >= 0 ? sourceUri.slice(comma + 1) : sourceUri;
-        log("decoded data: URL", { b64Length: b64.length });
+        const b64 = comma >= 0 ? sourceUri.slice(comma + 1) : sourceUri;
+        // @ts-ignore — atob is global in Hermes
+        const bin: string = (globalThis as any).atob(b64);
+        bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        log("decoded data: URL", { b64Length: b64.length, bytes: bytes.length });
       } else {
         const r = await fetch(sourceUri);
         if (!r.ok) return { uri: "", error: `download HTTP ${r.status}` };
@@ -132,11 +140,7 @@ export function ImageLightbox({ uri, onClose }: Props) {
       }
 
       try {
-        if (b64 != null) {
-          file.write(b64, { encoding: "base64" });
-        } else {
-          file.write(bytes!);
-        }
+        file.write(bytes);
         log("file.write ok");
       } catch (e: any) {
         return { uri: "", error: `file.write: ${e?.message || e}` };
