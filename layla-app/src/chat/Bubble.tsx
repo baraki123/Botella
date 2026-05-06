@@ -27,6 +27,10 @@ interface Props {
 export function Bubble({ message, onImagePress }: Props) {
   const isUser = message.role === "user";
   const text = stripHtml(message.text);
+  // Image-only Layla messages render edge-to-edge (no gold dot, no
+  // text-bubble padding) so the chart fills the chat width and feels
+  // like a centerpiece, not a thumbnail tucked next to a paragraph.
+  const isImageOnly = !isUser && !!message.imageUrl && !text;
   const reduced = useReducedMotion();
 
   const fade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
@@ -71,6 +75,30 @@ export function Bubble({ message, onImagePress }: Props) {
             {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
           </Text>
         </View>
+      </Animated.View>
+    );
+  }
+
+  if (isImageOnly) {
+    return (
+      <Animated.View
+        style={[
+          styles.imageOnlyRow,
+          { opacity: fade, transform: [{ translateY: lift }] },
+        ]}
+      >
+        <Pressable
+          onPress={() => onImagePress?.(message.imageUrl!)}
+          accessibilityRole="imagebutton"
+          accessibilityLabel="Open full-size chart"
+          style={({ pressed }) => [pressed && { opacity: 0.88 }]}
+        >
+          <Image
+            source={{ uri: message.imageUrl }}
+            style={styles.imageFull}
+            resizeMode="contain"
+          />
+        </Pressable>
       </Animated.View>
     );
   }
@@ -181,6 +209,20 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 14,
     backgroundColor: "#0006",
+  },
+  imageOnlyRow: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    alignItems: "stretch",
+  },
+  imageFull: {
+    width: "100%",
+    // The new chart is 760x1023 → ~0.743 aspect ratio. Hard-coded so the
+    // bubble reserves the right amount of vertical space before the
+    // image loads (no layout jump on stream-arrival).
+    aspectRatio: 760 / 1023,
+    borderRadius: 16,
+    backgroundColor: "#15101A",
   },
   caret: { opacity: 0.5, color: theme.accent },
 });
