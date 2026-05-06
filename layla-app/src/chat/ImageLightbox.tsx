@@ -89,69 +89,67 @@ export function ImageLightbox({ uri, onClose }: Props) {
     const log = (msg: string, extra?: any) =>
       console.log(`[lightbox] ${msg}`, extra ?? "");
     try {
-      const FS: any = await import("expo-file-system");
-      log("FS keys", Object.keys(FS).join(","));
+      // Use the legacy submodule. The new SDK 54 File.write binding has
+      // three native overloads (String / Data / TypedArray) but the
+      // TypedArray overload crashes Expo Go when passed a Uint8Array via
+      // the JSI bridge — repeatable on iOS with files >50KB. The legacy
+      // writeAsStringAsync(uri, base64, {encoding:'base64'}) path is
+      // battle-tested across SDKs and is shipped as a real working API
+      // at `expo-file-system/legacy` (the bare-import legacy methods
+      // are stubs that throw, but the submodule is fully functional).
+      const Legacy: any = await import("expo-file-system/legacy");
+      log("legacy keys", Object.keys(Legacy).slice(0, 12).join(","));
 
-      if (!FS.File || !FS.Paths) {
+      const docDir: string | undefined =
+        Legacy.documentDirectory || Legacy.cacheDirectory;
+      if (!docDir) {
         return {
           uri: "",
-          error:
-            `expo-file-system shape unexpected (have File=${!!FS.File}, Paths=${!!FS.Paths}; ` +
-            `keys: ${Object.keys(FS).slice(0, 8).join(",")})`,
+          error: `legacy submodule missing documentDirectory (keys: ${Object.keys(
+            Legacy,
+          ).slice(0, 8).join(",")})`,
         };
       }
 
       const ts = Date.now();
-      const filename = `layla-chart-${ts}.png`;
+      const dir = docDir.endsWith("/") ? docDir : `${docDir}/`;
+      const target = `${dir}layla-chart-${ts}.png`;
+      log("target", target);
 
-      // Resolve to a Uint8Array — the native File.write binding takes a
-      // single argument. The TS types document a (content, options)
-      // signature but the runtime binding rejects it with "received 2
-      // arguments but 1 was expected", so we decode base64 in JS and
-      // pass the bytes directly.
-      let bytes: Uint8Array;
+      let b64: string;
       if (sourceUri.startsWith("data:")) {
         const comma = sourceUri.indexOf(",");
-        const b64 = comma >= 0 ? sourceUri.slice(comma + 1) : sourceUri;
-        // @ts-ignore — atob is global in Hermes
-        const bin: string = (globalThis as any).atob(b64);
-        bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        log("decoded data: URL", { b64Length: b64.length, bytes: bytes.length });
+        b64 = comma >= 0 ? sourceUri.slice(comma + 1) : sourceUri;
+        log("decoded data: URL", { b64Length: b64.length });
       } else {
         const r = await fetch(sourceUri);
         if (!r.ok) return { uri: "", error: `download HTTP ${r.status}` };
-        bytes = new Uint8Array(await r.arrayBuffer());
-        log("fetched bytes", { len: bytes.length });
-      }
-
-      const docDir = FS.Paths.document;
-      log("docDir.uri", docDir?.uri);
-      const file = new FS.File(docDir, filename);
-      log("file.uri before create", file.uri);
-
-      try {
-        file.create({ overwrite: true, intermediates: true });
-        log("file.create ok");
-      } catch (e: any) {
-        // create can throw if the file already exists despite overwrite=true
-        // on some build configs — write() can still succeed.
-        log("file.create threw (continuing)", e?.message);
+        const buf = await r.arrayBuffer();
+        // Re-encode raw bytes as base64 for writeAsStringAsync.
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          bin += String.fromCharCode.apply(
+            null,
+            bytes.subarray(i, i + CHUNK) as any,
+          );
+        }
+        // @ts-ignore — btoa is global in Hermes
+        b64 = (globalThis as any).btoa(bin);
+        log("fetched bytes", { len: bytes.length, b64Length: b64.length });
       }
 
       try {
-        file.write(bytes);
-        log("file.write ok");
+        await Legacy.writeAsStringAsync(target, b64, {
+          encoding: Legacy.EncodingType?.Base64 ?? "base64",
+        });
+        log("writeAsStringAsync ok");
       } catch (e: any) {
-        return { uri: "", error: `file.write: ${e?.message || e}` };
+        return { uri: "", error: `writeAsStringAsync: ${e?.message || e}` };
       }
 
-      const uri = file.uri;
-      if (!uri) {
-        return { uri: "", error: "file.uri empty after write" };
-      }
-      log("returning uri", uri);
-      return { uri, error: null };
+      return { uri: target, error: null };
     } catch (e: any) {
       log("materializeFile threw", e?.message);
       return { uri: "", error: e?.message || String(e) };
