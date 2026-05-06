@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
+// @ts-ignore — no shipped types
+import Markdown from "react-native-markdown-display";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
@@ -127,10 +129,21 @@ export function Bubble({ message, onImagePress }: Props) {
             </Pressable>
           ) : null}
           {text ? (
-            <Text style={styles.botText}>
-              {text}
-              {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
-            </Text>
+            message.streaming ? (
+              // Streaming chat replies: keep plain Text + caret for the
+              // tight token-tail UX. Markdown library can't easily append
+              // a non-markdown caret element mid-render.
+              <Text style={styles.botText}>
+                {text}
+                <Text style={styles.caret}>▍</Text>
+              </Text>
+            ) : (
+              // Completed bot message: render markdown so GPT's natural
+              // headers (`### Sun in Pisces`), bold (`**term**`), and
+              // bulleted lists become properly styled instead of showing
+              // raw syntax characters.
+              <Markdown style={markdownStyles}>{text}</Markdown>
+            )
           ) : null}
         </View>
       </View>
@@ -226,3 +239,117 @@ const styles = StyleSheet.create({
   },
   caret: { opacity: 0.5, color: theme.accent },
 });
+
+
+// ─── Markdown theme — Layla palette ──────────────────────────────────────
+//
+// `react-native-markdown-display` styles pass through to RN Text /View
+// components for each markdown node type. We only override the nodes the
+// natal reading actually uses (headings, paragraphs, strong/em, bullets,
+// horizontal rule). Anything else falls back to the library's defaults.
+//
+// Headings render in gold; body in the same ink as plain bot text so a
+// reading reads as one continuous voice; bullets get a gold bullet
+// marker instead of the default dash.
+const markdownStyles = {
+  body: {
+    color: theme.bubbleBotText,
+    fontSize: 18,
+    lineHeight: 27,
+    letterSpacing: 0.1,
+  },
+  paragraph: {
+    marginTop: 0,
+    marginBottom: 12,
+  },
+  heading1: {
+    color: theme.accent,
+    fontSize: 24,
+    lineHeight: 32,
+    fontWeight: "600" as const,
+    marginTop: 6,
+    marginBottom: 12,
+    letterSpacing: 0.4,
+  },
+  heading2: {
+    color: theme.accent,
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: "600" as const,
+    marginTop: 6,
+    marginBottom: 10,
+    letterSpacing: 0.3,
+  },
+  heading3: {
+    color: theme.accent,
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: "600" as const,
+    marginTop: 4,
+    marginBottom: 8,
+    letterSpacing: 0.25,
+  },
+  heading4: {
+    color: theme.accent,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "600" as const,
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  strong: {
+    fontWeight: "700" as const,
+    // Bold tokens (planet names, key claims) get a hint of gold so they
+    // pop out of the body without yelling.
+    color: theme.bubbleBotText,
+  },
+  em: {
+    fontStyle: "italic" as const,
+    color: theme.bubbleBotText,
+  },
+  bullet_list: {
+    marginBottom: 8,
+  },
+  ordered_list: {
+    marginBottom: 8,
+  },
+  list_item: {
+    marginBottom: 4,
+    flexDirection: "row" as const,
+  },
+  bullet_list_icon: {
+    color: theme.accent,
+    marginRight: 8,
+    fontSize: 18,
+    lineHeight: 27,
+  },
+  ordered_list_icon: {
+    color: theme.accent,
+    marginRight: 8,
+    fontSize: 18,
+    lineHeight: 27,
+  },
+  hr: {
+    backgroundColor: theme.border,
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 14,
+  },
+  blockquote: {
+    backgroundColor: "transparent",
+    borderLeftWidth: 2,
+    borderLeftColor: theme.accentDim,
+    paddingLeft: 12,
+    marginVertical: 8,
+  },
+  code_inline: {
+    backgroundColor: theme.surfaceRaised,
+    color: theme.bubbleBotText,
+    fontSize: 16,
+    paddingHorizontal: 4,
+    borderRadius: 3,
+  },
+  link: {
+    color: theme.accent,
+    textDecorationLine: "underline" as const,
+  },
+};
