@@ -2,6 +2,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -32,6 +33,11 @@ interface Props {
   bottomInset?: number;
 }
 
+// Auto-dismiss the keyboard after this many ms of typing inactivity
+// (no onChangeText fires for the duration). Re-armed on every keystroke.
+const IDLE_DISMISS_MS = 3000;
+
+
 export function Composer({
   onSend,
   status = "open",
@@ -44,9 +50,34 @@ export function Composer({
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const ready = !!value.trim();
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearIdleTimer = () => {
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  };
+
+  const armIdleTimer = () => {
+    clearIdleTimer();
+    idleTimerRef.current = setTimeout(() => {
+      Keyboard.dismiss();
+      idleTimerRef.current = null;
+    }, IDLE_DISMISS_MS);
+  };
+
+  const handleChangeText = (next: string) => {
+    setValue(next);
+    armIdleTimer();
+  };
+
+  // Clean up timer on unmount.
+  useEffect(() => () => clearIdleTimer(), []);
 
   const submit = () => {
     if (!ready) return;
+    clearIdleTimer();
     onSend(value.trim());
     setValue("");
   };
@@ -73,9 +104,18 @@ export function Composer({
           <TextInput
             style={styles.input}
             value={recording ? "" : value}
-            onChangeText={setValue}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
+            onChangeText={handleChangeText}
+            onFocus={() => {
+              setFocused(true);
+              // Don't dismiss immediately on focus — only after idle.
+              // Arm the timer so simply opening the keyboard without
+              // typing also closes it after 3s.
+              armIdleTimer();
+            }}
+            onBlur={() => {
+              setFocused(false);
+              clearIdleTimer();
+            }}
             placeholder={
               recording
                 ? "Listening…"

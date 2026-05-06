@@ -128,6 +128,17 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     }
   }, []);
 
+  // The most recent bot message that still has chips attached. Rendered
+  // in a sticky row above the Composer so the keyboard never hides it
+  // and so a long bubble doesn't leave the chips off-screen.
+  const latestChipMessage = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.quickReplies && m.quickReplies.length > 0) return m;
+    }
+    return null;
+  }, [messages]);
+
   const jumpToLatest = useCallback(() => {
     userOverrideRef.current = false;
     showPill(false);
@@ -352,7 +363,11 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     }
   }
 
-  function pickQuickReply(value: string, fromMessageId: string) {
+  function pickQuickReply(
+    sendValue: string,
+    displayLabel: string,
+    fromMessageId: string,
+  ) {
     // Remove the chips so they can't be tapped twice. (URL-form chips
     // never reach this callback — they open externally via Linking.)
     setMessages((m) =>
@@ -360,7 +375,15 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
         msg.id === fromMessageId ? { ...msg, quickReplies: undefined } : msg,
       ),
     );
-    send(value);
+    // The user bubble shows the human-readable label (e.g. "Continue →")
+    // even when the wire value is something else; for chips like
+    // "♃ My Jupiter" the value is the natural-language sentence, so we
+    // display that instead — caller controls which it wants by setting
+    // value === label or value !== label.
+    userOverrideRef.current = false;
+    showPill(false);
+    setMessages((m) => [...m, { id: uid(), role: "user", text: displayLabel }]);
+    streamRef.current?.send({ text: sendValue });
   }
 
   if (authError) {
@@ -411,12 +434,10 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             renderItem={({ item }) => (
               <View>
                 <Bubble message={item} onImagePress={setLightboxUri} />
-                {item.quickReplies ? (
-                  <QuickReplies
-                    options={item.quickReplies}
-                    onPick={(opt) => pickQuickReply(opt, item.id)}
-                  />
-                ) : null}
+                {/* Quick-reply chips render in a sticky row above the
+                    Composer (see below) so the keyboard never hides
+                    them. Inline rendering inside the bubble is
+                    intentionally skipped. */}
               </View>
             )}
             ListFooterComponent={showTyping ? <TypingIndicator /> : null}
@@ -428,6 +449,20 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
           />
           <JumpToLatest opacity={pillOpacity} onPress={jumpToLatest} />
         </View>
+
+        {/* Sticky quick-reply row — sits between the message list and the
+            Composer, inside the same KeyboardAvoidingView, so it rises
+            with the keyboard instead of being covered by it. */}
+        {latestChipMessage ? (
+          <View style={styles.stickyChips}>
+            <QuickReplies
+              options={latestChipMessage.quickReplies!}
+              onPick={(sendValue, displayLabel) =>
+                pickQuickReply(sendValue, displayLabel, latestChipMessage.id)
+              }
+            />
+          </View>
+        ) : null}
 
         <Composer
           onSend={send}
@@ -595,6 +630,16 @@ const styles = StyleSheet.create({
   listWrap: { flex: 1 },
   list: { flex: 1 },
   listContent: { paddingVertical: 12 },
+  // Sticky chip row sits flush above the Composer with a hairline divider
+  // and a translucent surface so the chips read as a tray, not as part of
+  // the message stream.
+  stickyChips: {
+    backgroundColor: theme.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.border,
+    paddingTop: 6,
+    paddingBottom: 0,
+  },
   pillWrap: {
     position: "absolute",
     right: 14,

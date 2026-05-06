@@ -8,10 +8,15 @@ import type { QuickReplyOption } from "./types";
 
 interface Props {
   options: QuickReplyOption[];
-  /** Called when a "value" or string-form option is tapped — caller sends
-   *  the value as a chat turn. URL-form options are NOT routed here; they
-   *  open externally via Linking. */
-  onPick: (value: string) => void;
+  /** Called when a "value" or string-form option is tapped. The caller
+   *  decides what to send to the server (`sendValue`) and what to show
+   *  in the user-message bubble (`displayLabel`). They differ when the
+   *  option is `{ label: "Continue →", value: "Continue →" }`-style or
+   *  `{ label: "♃ My Jupiter", value: "Tell me about my Jupiter" }`-style
+   *  — the chip shows the label, the user bubble may match either, and
+   *  the server gets the value. URL-form options are NOT routed here;
+   *  they open externally via Linking. */
+  onPick: (sendValue: string, displayLabel: string) => void;
 }
 
 /**
@@ -43,7 +48,7 @@ function Chip({
   index,
 }: {
   option: QuickReplyOption;
-  onPick: (value: string) => void;
+  onPick: (sendValue: string, displayLabel: string) => void;
   index: number;
 }) {
   const reduced = useReducedMotion();
@@ -76,14 +81,16 @@ function Chip({
 
   const handlePress = () => {
     if (typeof option === "string") {
-      onPick(option);
+      // Plain-string option — same value on the wire and in the bubble.
+      onPick(option, option);
       return;
     }
     if ("url" in option) {
       Linking.openURL(option.url).catch(() => {});
       return;
     }
-    onPick(option.value);
+    // {label, value} — server gets value; user bubble shows label.
+    onPick(option.value, option.label);
   };
 
   return (
