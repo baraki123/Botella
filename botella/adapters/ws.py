@@ -56,6 +56,40 @@ def build_ws_router(manifest: BotManifest) -> APIRouter:
             return
 
         await ws.accept()
+
+        # ─── Auto-resume on connect (mid-flow users only) ──────────────
+        # When an existing session is mid-flow, synthesize an internal
+        # /start so the trigger's resume gates fire (re-emit current
+        # section / rerun LLM / Stay / etc.). This means an iOS app that
+        # reconnects after a network blip or after being backgrounded
+        # sees its current state without depending on the client's
+        # one-shot auto-/start logic firing again.
+        #
+        # For fresh users (no session.flow yet) we skip this — the iOS
+        # client's first /start will drive normal onboarding entry, and
+        # tests that expect their first ws.send_json to be the only
+        # /start in flight don't get a surprise event from us.
+        try:
+            existing = await manifest.storage.load_session(user_id)
+            if existing.flow is not None:
+                resume_msg = InboundMessage(
+                    user_id=user_id,
+                    transport="ws_resume",
+                    text="/start",
+                    callback_data=None,
+                    voice_origin=False,
+                )
+                async for event in _with_keepalive(runtime.run(resume_msg, manifest)):
+                    payload = _scrub(event.payload)
+                    await ws.send_json({"type": event.type, "payload": payload})
+                await ws.send_json({"type": "turn_end", "payload": {}})
+        except WebSocketDisconnect:
+            return
+        except Exception:
+            log.exception("ws auto-resume error")
+            # Don't close — let the user proceed with their first real
+            # message even if the resume push had a hiccup.
+
         try:
             while True:
                 raw = await ws.receive_text()
