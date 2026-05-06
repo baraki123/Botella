@@ -32,6 +32,7 @@ import {
   signInWithApple,
 } from "../auth/apple";
 import { redeemLinkCode } from "../api/link";
+import { fetchMe, MeBuild } from "../api/me";
 
 const PRIVACY_URL = "https://layla.app/privacy"; // TODO: real URL before submission
 const TERMS_URL = "https://layla.app/terms";
@@ -49,10 +50,22 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched }: SettingsScree
   const [canLinkApple, setCanLinkApple] = useState(false);
   const [tgCode, setTgCode] = useState("");
   const [tgLinkOpen, setTgLinkOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [build, setBuild] = useState<MeBuild | null>(null);
 
   useEffect(() => {
     currentAuthProvider().then((p) => setProvider(p ?? "anonymous"));
     appleSignInAvailable().then(setCanLinkApple);
+    // Pull /v1/me so we can show admins the deployed build (sha + note +
+    // commit time + boot time). Non-admins never see this section.
+    loadCachedSession().then((s) => {
+      if (!s) return;
+      fetchMe(s.jwt).then((me) => {
+        if (!me) return;
+        setIsAdmin(me.is_admin);
+        setBuild(me.build);
+      });
+    });
   }, []);
 
   async function handleRedeemTelegramCode() {
@@ -242,6 +255,18 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched }: SettingsScree
         />
       </Section>
 
+      {isAdmin && build ? (
+        <Section title="Admin · Build">
+          <Row label="SHA" value={build.sha} />
+          <Row label="Committed" value={formatTimestamp(build.commit_time)} />
+          <Row label="Booted" value={formatTimestamp(build.boot_time)} />
+          <View style={styles.buildNote}>
+            <Text style={styles.buildNoteLabel}>Last change</Text>
+            <Text style={styles.buildNoteText}>{build.note}</Text>
+          </View>
+        </Section>
+      ) : null}
+
       <Section title="About">
         <ActionRow label="Privacy policy" onPress={() => Linking.openURL(PRIVACY_URL)} />
         <ActionRow label="Terms of use" onPress={() => Linking.openURL(TERMS_URL)} />
@@ -268,6 +293,24 @@ function Row({ label, value }: { label: string; value: string }) {
       <Text style={styles.rowValue}>{value}</Text>
     </View>
   );
+}
+
+function formatTimestamp(iso: string): string {
+  // Best-effort short, locale-friendly rendering of an ISO timestamp.
+  // "2026-05-06T16:21:54-04:00" → "May 6, 16:21" (relative to user TZ).
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const m = d.toLocaleString(undefined, { month: "short", day: "numeric" });
+    const t = d.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    return `${m}, ${t}`;
+  } catch {
+    return iso;
+  }
 }
 
 function ActionRow({
@@ -363,6 +406,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     letterSpacing: 2,
     marginBottom: 8,
+  },
+  buildNote: {
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    backgroundColor: theme.surface,
+  },
+  buildNoteLabel: {
+    fontSize: 11,
+    color: theme.accent,
+    textTransform: "uppercase",
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  buildNoteText: {
+    fontSize: 14,
+    color: theme.text,
+    lineHeight: 19,
   },
   footer: {
     color: theme.textMuted,
