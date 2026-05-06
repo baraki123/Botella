@@ -86,40 +86,80 @@ export function ImageLightbox({ uri, onClose }: Props) {
   const materializeFile = async (
     sourceUri: string,
   ): Promise<{ uri: string; error: string | null }> => {
+    const log = (msg: string, extra?: any) =>
+      console.log(`[lightbox] ${msg}`, extra ?? "");
     try {
       const FS: any = await import("expo-file-system");
+      log("FS keys", Object.keys(FS).slice(0, 12));
       const ts = Date.now();
       const filename = `layla-chart-${ts}.png`;
-      const file = new FS.File(FS.Paths.document, filename);
-      try {
-        file.create({ overwrite: true, intermediates: true });
-      } catch {
-        // Ignore — write() will still throw if create truly failed.
-      }
 
+      // Decode source bytes — base64 (data URL) or HTTP fetch.
+      let bytes: Uint8Array | null = null;
+      let b64: string | null = null;
       if (sourceUri.startsWith("data:")) {
         const comma = sourceUri.indexOf(",");
-        const b64 = comma >= 0 ? sourceUri.slice(comma + 1) : sourceUri;
-        file.write(b64, { encoding: "base64" });
+        b64 = comma >= 0 ? sourceUri.slice(comma + 1) : sourceUri;
+        log("decoded data: URL", { b64Length: b64.length });
       } else {
-        // Remote URL — fetch the bytes ourselves so we don't depend on
-        // expo-file-system's downloadAsync legacy surface.
         const r = await fetch(sourceUri);
-        if (!r.ok) {
-          return { uri: "", error: `download HTTP ${r.status}` };
-        }
-        const buf = new Uint8Array(await r.arrayBuffer());
-        file.write(buf);
+        if (!r.ok) return { uri: "", error: `download HTTP ${r.status}` };
+        bytes = new Uint8Array(await r.arrayBuffer());
+        log("fetched bytes", { len: bytes.length });
       }
 
-      // Sanity check — if the file isn't readable now, downstream APIs
-      // are guaranteed to fail with an unhelpful error. Surface here
-      // instead.
-      if (!file.exists) {
-        return { uri: "", error: "file not present after write" };
+      // Try the new SDK 54 Paths/File API first.
+      if (FS.File && FS.Paths) {
+        try {
+          const file = new FS.File(FS.Paths.document, filename);
+          try {
+            file.create({ overwrite: true, intermediates: true });
+          } catch (e: any) {
+            log("file.create threw (continuing)", e?.message);
+          }
+          if (b64 != null) {
+            file.write(b64, { encoding: "base64" });
+          } else {
+            file.write(bytes!);
+          }
+          const exists = !!file.exists;
+          const uri = file.uri;
+          log("new-API write done", { uri, exists });
+          if (exists && uri) return { uri, error: null };
+          // fall through to legacy
+        } catch (e: any) {
+          log("new-API path threw, falling back", e?.message);
+        }
       }
-      return { uri: file.uri, error: null };
+
+      // Legacy API fallback — older expo-file-system surface that's
+      // still exported for compatibility.
+      const dir = FS.documentDirectory || FS.cacheDirectory;
+      if (!dir) return { uri: "", error: "no documentDirectory available" };
+      const target = `${dir}${filename}`;
+      if (b64 != null) {
+        await FS.writeAsStringAsync(target, b64, {
+          encoding: FS.EncodingType?.Base64 ?? "base64",
+        });
+      } else {
+        // Re-encode the bytes as base64 so writeAsStringAsync accepts them.
+        // (legacy API doesn't take Uint8Array directly.)
+        let bin = "";
+        for (let i = 0; i < bytes!.length; i++) bin += String.fromCharCode(bytes![i]);
+        // @ts-ignore — btoa exists in RN's Hermes runtime
+        const b64FromBytes = (globalThis.btoa || ((s: string) => Buffer.from(s, "binary").toString("base64")))(bin);
+        await FS.writeAsStringAsync(target, b64FromBytes, {
+          encoding: FS.EncodingType?.Base64 ?? "base64",
+        });
+      }
+      const info = await FS.getInfoAsync(target);
+      log("legacy write done", info);
+      if (!info?.exists) {
+        return { uri: "", error: "file not present after legacy write" };
+      }
+      return { uri: target, error: null };
     } catch (e: any) {
+      log("materializeFile threw", e?.message);
       return { uri: "", error: e?.message || String(e) };
     }
   };
