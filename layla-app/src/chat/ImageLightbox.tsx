@@ -119,7 +119,7 @@ export function ImageLightbox({ uri, onClose }: Props) {
         >
           <Image
             source={{ uri: uri! }}
-            style={{ width: width * 0.96, height: height * 0.86 }}
+            style={{ width, height }}
             resizeMode="contain"
             accessibilityIgnoresInvertColors
           />
