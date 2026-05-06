@@ -6,6 +6,7 @@ import {
   Animated,
   FlatList,
   KeyboardAvoidingView,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
@@ -84,6 +85,21 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const userOverrideRef = useRef(false); // user manually scrolled away
   const pillOpacity = useRef(new Animated.Value(0)).current;
 
+  // Per-message rendered height (keyed by message id) + the FlatList's
+  // viewport height. Used to decide where to scroll when a new bot
+  // message arrives: short message → bottom (sticky); tall message
+  // (won't fit) → align its TOP to the viewport top so the user reads
+  // from the start instead of landing in the middle/end.
+  const messageHeightsRef = useRef<Map<string, number>>(new Map());
+  const listHeightRef = useRef(0);
+  const lastAnchoredIdRef = useRef<string | null>(null);
+  // Mirror of `messages` state so the height-callback can read the
+  // current array without going stale across renders.
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   const showPill = useCallback(
     (visible: boolean) => {
       Animated.timing(pillOpacity, {
@@ -123,9 +139,53 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     // Fires on every list-content size change (new message, streaming
     // token append, typing indicator toggle). Sticky-bottom: scroll only
     // if the user hasn't manually scrolled away.
-    if (!userOverrideRef.current) {
+    //
+    // For BOT messages we don't scroll here — `recordMessageHeight`
+    // does the smart anchor (top-of-message vs bottom-of-list) once
+    // it sees the message's measured height via onLayout. For user
+    // messages and streaming token appends we still scrollToEnd
+    // because they're guaranteed-short and the user expects them at
+    // the bottom.
+    if (userOverrideRef.current) return;
+    const last = messagesRef.current[messagesRef.current.length - 1];
+    if (!last || last.role === "user") {
+      listRef.current?.scrollToEnd({ animated: true });
+      return;
+    }
+    if (last.streaming) {
+      listRef.current?.scrollToEnd({ animated: true });
+      return;
+    }
+    // Bot message that's done streaming — defer to recordMessageHeight.
+  }, []);
+
+  const recordMessageHeight = useCallback((id: string, height: number) => {
+    messageHeightsRef.current.set(id, height);
+    if (userOverrideRef.current) return;
+    if (lastAnchoredIdRef.current === id) return;
+    const arr = messagesRef.current;
+    const last = arr[arr.length - 1];
+    if (!last || last.id !== id) return;
+    if (last.role === "user") return;       // user bubbles always sticky-bottom
+    if (last.streaming) return;             // wait for streaming to finish
+    const viewH = listHeightRef.current;
+    if (viewH > 0 && height > viewH * 0.85) {
+      // Too tall to fit — anchor message top to viewport top so the
+      // user reads from the start.
+      listRef.current?.scrollToIndex({
+        index: arr.length - 1,
+        viewPosition: 0,
+        animated: true,
+      });
+    } else {
+      // Fits — keep current sticky-bottom behaviour.
       listRef.current?.scrollToEnd({ animated: true });
     }
+    lastAnchoredIdRef.current = id;
+  }, []);
+
+  const handleListLayout = useCallback((e: LayoutChangeEvent) => {
+    listHeightRef.current = e.nativeEvent.layout.height;
   }, []);
 
   // The most recent bot message that still has chips attached. Rendered
@@ -432,7 +492,11 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             data={messages}
             keyExtractor={(m) => m.id}
             renderItem={({ item }) => (
-              <View>
+              <View
+                onLayout={(e) =>
+                  recordMessageHeight(item.id, e.nativeEvent.layout.height)
+                }
+              >
                 <Bubble message={item} onImagePress={setLightboxUri} />
                 {/* Quick-reply chips render in a sticky row above the
                     Composer (see below) so the keyboard never hides
@@ -442,9 +506,21 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             )}
             ListFooterComponent={showTyping ? <TypingIndicator /> : null}
             keyboardShouldPersistTaps="handled"
+            onLayout={handleListLayout}
             onScroll={handleScroll}
             onScrollBeginDrag={handleScrollBeginDrag}
             onContentSizeChange={handleContentSizeChange}
+            // scrollToIndex on a tall message can fail if the index is
+            // outside the rendered window; this fallback rescues it.
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                listRef.current?.scrollToIndex({
+                  index: info.index,
+                  viewPosition: 0,
+                  animated: true,
+                });
+              }, 80);
+            }}
             scrollEventThrottle={32}
           />
           <JumpToLatest opacity={pillOpacity} onPress={jumpToLatest} />
