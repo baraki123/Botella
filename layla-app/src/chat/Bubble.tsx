@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Image, StyleSheet, Text, View } from "react-native";
+import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
@@ -7,6 +7,9 @@ import type { Message } from "./types";
 
 interface Props {
   message: Message;
+  /** Called when the user taps an inline image. Caller opens the
+   * full-screen lightbox. */
+  onImagePress?: (uri: string) => void;
 }
 
 /**
@@ -21,7 +24,7 @@ interface Props {
  * gold dot blooms in slightly after Layla's text starts settling — small
  * timing detail that makes her presence feel composed rather than abrupt.
  */
-export function Bubble({ message }: Props) {
+export function Bubble({ message, onImagePress }: Props) {
   const isUser = message.role === "user";
   const text = stripHtml(message.text);
   const reduced = useReducedMotion();
@@ -82,11 +85,18 @@ export function Bubble({ message }: Props) {
         />
         <View style={styles.botContent}>
           {message.imageUrl ? (
-            <Image
-              source={{ uri: message.imageUrl }}
-              style={styles.image}
-              resizeMode="contain"
-            />
+            <Pressable
+              onPress={() => onImagePress?.(message.imageUrl!)}
+              accessibilityRole="imagebutton"
+              accessibilityLabel="Open full-size chart"
+              style={({ pressed }) => [pressed && { opacity: 0.85 }]}
+            >
+              <Image
+                source={{ uri: message.imageUrl }}
+                style={styles.image}
+                resizeMode="contain"
+              />
+            </Pressable>
           ) : null}
           {text ? (
             <Text style={styles.botText}>

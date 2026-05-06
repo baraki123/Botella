@@ -29,6 +29,7 @@ import {
 } from "../voice/recorder";
 import { Bubble } from "./Bubble";
 import { Composer } from "./Composer";
+import { ImageLightbox } from "./ImageLightbox";
 import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator } from "./TypingIndicator";
 import { Glow } from "./atmosphere/Glow";
@@ -59,6 +60,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const voice = useVoiceRecorder();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
 
   // ─── Scroll behavior — sticky-bottom + jump-to-latest pill ───────────
@@ -393,7 +395,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             keyExtractor={(m) => m.id}
             renderItem={({ item }) => (
               <View>
-                <Bubble message={item} />
+                <Bubble message={item} onImagePress={setLightboxUri} />
                 {item.quickReplies ? (
                   <QuickReplies
                     options={item.quickReplies}
@@ -422,6 +424,8 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
           bottomInset={insets.bottom}
         />
       </KeyboardAvoidingView>
+
+      <ImageLightbox uri={lightboxUri} onClose={() => setLightboxUri(null)} />
     </View>
   );
 }
