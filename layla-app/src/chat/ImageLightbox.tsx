@@ -72,29 +72,55 @@ export function ImageLightbox({ uri, onClose }: Props) {
   };
 
   // Materializes the (possibly base64) image as a real local file URI so
-  // expo-sharing / expo-media-library can act on it. data: URLs aren't
-  // accepted by either API. Returns the file URI on success, null on
-  // failure (caller surfaces the error).
-  const materializeFile = async (sourceUri: string): Promise<string | null> => {
+  // expo-sharing / expo-media-library can act on it. Both APIs reject
+  // data: URLs and need a path WITH a file extension that the OS
+  // recognizes; on iOS they also need the file inside the app sandbox
+  // (cache and documents both work — documents survives app restarts,
+  // which we use here so the share-sheet copy doesn't lose the source
+  // mid-handoff).
+  //
+  // Uses the SDK 54+ Paths/File API. The earlier writeAsStringAsync
+  // path was failing with "no extension" on save and "no access" on
+  // share — root-caused to a stale legacy API surface that didn't
+  // produce a sandboxed file URI in some build configs.
+  const materializeFile = async (
+    sourceUri: string,
+  ): Promise<{ uri: string; error: string | null }> => {
     try {
-      const FileSystem: any = await import("expo-file-system");
-      const dir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-      if (!dir) return sourceUri;
+      const FS: any = await import("expo-file-system");
       const ts = Date.now();
-      const target = `${dir}layla-chart-${ts}.png`;
+      const filename = `layla-chart-${ts}.png`;
+      const file = new FS.File(FS.Paths.document, filename);
+      try {
+        file.create({ overwrite: true, intermediates: true });
+      } catch {
+        // Ignore — write() will still throw if create truly failed.
+      }
+
       if (sourceUri.startsWith("data:")) {
         const comma = sourceUri.indexOf(",");
         const b64 = comma >= 0 ? sourceUri.slice(comma + 1) : sourceUri;
-        await FileSystem.writeAsStringAsync(target, b64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        return target;
+        file.write(b64, { encoding: "base64" });
+      } else {
+        // Remote URL — fetch the bytes ourselves so we don't depend on
+        // expo-file-system's downloadAsync legacy surface.
+        const r = await fetch(sourceUri);
+        if (!r.ok) {
+          return { uri: "", error: `download HTTP ${r.status}` };
+        }
+        const buf = new Uint8Array(await r.arrayBuffer());
+        file.write(buf);
       }
-      // Remote URL — download to cache.
-      const dl = await FileSystem.downloadAsync(sourceUri, target);
-      return dl?.uri ?? null;
-    } catch {
-      return null;
+
+      // Sanity check — if the file isn't readable now, downstream APIs
+      // are guaranteed to fail with an unhelpful error. Surface here
+      // instead.
+      if (!file.exists) {
+        return { uri: "", error: "file not present after write" };
+      }
+      return { uri: file.uri, error: null };
+    } catch (e: any) {
+      return { uri: "", error: e?.message || String(e) };
     }
   };
 
@@ -120,12 +146,15 @@ export function ImageLightbox({ uri, onClose }: Props) {
         );
         return;
       }
-      const fileUri = await materializeFile(uri);
-      if (!fileUri) {
-        Alert.alert("Couldn't save", "Failed to materialize the image.");
+      const m = await materializeFile(uri);
+      if (m.error || !m.uri) {
+        Alert.alert(
+          "Couldn't save",
+          `Could not prepare the image: ${m.error ?? "unknown"}`,
+        );
         return;
       }
-      const asset = await MediaLibrary.createAssetAsync(fileUri);
+      const asset = await MediaLibrary.createAssetAsync(m.uri);
       try {
         await MediaLibrary.createAlbumAsync("Layla", asset, false);
       } catch {
@@ -157,12 +186,15 @@ export function ImageLightbox({ uri, onClose }: Props) {
         Alert.alert("Sharing unavailable on this device.");
         return;
       }
-      const fileUri = await materializeFile(uri);
-      if (!fileUri) {
-        Alert.alert("Couldn't share", "Failed to materialize the image.");
+      const m = await materializeFile(uri);
+      if (m.error || !m.uri) {
+        Alert.alert(
+          "Couldn't share",
+          `Could not prepare the image: ${m.error ?? "unknown"}`,
+        );
         return;
       }
-      await Sharing.shareAsync(fileUri, {
+      await Sharing.shareAsync(m.uri, {
         mimeType: "image/png",
         dialogTitle: "Share your chart",
         UTI: "public.png",
