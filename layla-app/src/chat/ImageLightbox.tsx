@@ -122,28 +122,43 @@ export function ImageLightbox({ uri, onClose }: Props) {
           } else {
             file.write(bytes!);
           }
-          const exists = !!file.exists;
           const uri = file.uri;
-          log("new-API write done", { uri, exists });
-          if (exists && uri) return { uri, error: null };
-          // fall through to legacy
+          log("new-API write done", { uri, exists: file.exists });
+          // Trust the URI — file.exists is sometimes a stale read on the
+          // freshly-written file in SDK 54. Downstream APIs (MediaLibrary,
+          // Sharing) read the file when called, so if it's actually
+          // missing they'll error with their own message.
+          if (uri) return { uri, error: null };
         } catch (e: any) {
           log("new-API path threw, falling back", e?.message);
         }
       }
 
-      // Legacy API fallback — older expo-file-system surface that's
-      // still exported for compatibility.
-      const dir = FS.documentDirectory || FS.cacheDirectory;
-      if (!dir) return { uri: "", error: "no documentDirectory available" };
-      const target = `${dir}${filename}`;
-      if (b64 != null) {
+      // Legacy API fallback. expo-file-system 19+ removed the top-level
+      // `documentDirectory` / `cacheDirectory` getters, so we source the
+      // directory URI from the new Paths class when present.
+      const dir =
+        FS.documentDirectory ||
+        FS.cacheDirectory ||
+        FS.Paths?.document?.uri ||
+        FS.Paths?.cache?.uri;
+      if (!dir) {
+        return {
+          uri: "",
+          error:
+            "no document directory exposed by expo-file-system " +
+            `(keys: ${Object.keys(FS).slice(0, 10).join(",")})`,
+        };
+      }
+      const dirWithSlash = dir.endsWith("/") ? dir : `${dir}/`;
+      const target = `${dirWithSlash}${filename}`;
+      log("legacy target", target);
+
+      if (b64 != null && FS.writeAsStringAsync) {
         await FS.writeAsStringAsync(target, b64, {
           encoding: FS.EncodingType?.Base64 ?? "base64",
         });
-      } else {
-        // Re-encode the bytes as base64 so writeAsStringAsync accepts them.
-        // (legacy API doesn't take Uint8Array directly.)
+      } else if (FS.writeAsStringAsync) {
         let bin = "";
         for (let i = 0; i < bytes!.length; i++) bin += String.fromCharCode(bytes![i]);
         // @ts-ignore — btoa exists in RN's Hermes runtime
@@ -151,12 +166,10 @@ export function ImageLightbox({ uri, onClose }: Props) {
         await FS.writeAsStringAsync(target, b64FromBytes, {
           encoding: FS.EncodingType?.Base64 ?? "base64",
         });
+      } else {
+        return { uri: "", error: "writeAsStringAsync not available" };
       }
-      const info = await FS.getInfoAsync(target);
-      log("legacy write done", info);
-      if (!info?.exists) {
-        return { uri: "", error: "file not present after legacy write" };
-      }
+      log("legacy write returned");
       return { uri: target, error: null };
     } catch (e: any) {
       log("materializeFile threw", e?.message);
