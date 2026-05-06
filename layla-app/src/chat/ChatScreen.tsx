@@ -514,6 +514,11 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             )}
             ListFooterComponent={showTyping ? <TypingIndicator /> : null}
             keyboardShouldPersistTaps="handled"
+            // Dismiss the keyboard when the user starts scrolling. On iOS
+            // "interactive" lets the keyboard slide down with the scroll
+            // gesture (the iMessage / ChatGPT feel); on Android this
+            // falls back to no-op so we add it as a non-iOS hint too.
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             onLayout={handleListLayout}
             onScroll={handleScroll}
             onScrollBeginDrag={handleScrollBeginDrag}
