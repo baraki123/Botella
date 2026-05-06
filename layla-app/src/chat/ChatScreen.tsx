@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 
+import { fetchMe, type MeBuild } from "../api/me";
 import { connectStream, type StreamClient } from "../api/stream";
 import type { BotEvent } from "../api/types";
 import { ensureSession, type Session } from "../auth/anonymous";
@@ -27,6 +28,7 @@ import {
   transcribe,
   useVoiceRecorder,
 } from "../voice/recorder";
+import { AdminBuildBanner } from "./AdminBuildBanner";
 import { Bubble } from "./Bubble";
 import { Composer } from "./Composer";
 import { ImageLightbox } from "./ImageLightbox";
@@ -61,6 +63,8 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminBuild, setAdminBuild] = useState<MeBuild | null>(null);
   const insets = useSafeAreaInsets();
 
   // ─── Scroll behavior — sticky-bottom + jump-to-latest pill ───────────
@@ -151,6 +155,17 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+
+  // 2.5. Once we have a session, ping /v1/me so admin gets a one-shot
+  // build banner when a new deploy has landed since last open.
+  useEffect(() => {
+    if (!session) return;
+    fetchMe(session.jwt).then((me) => {
+      if (!me) return;
+      setIsAdmin(me.is_admin);
+      setAdminBuild(me.build);
+    });
+  }, [session?.jwt]);
 
   // 3. Auto-/start on first WS open. The server's /start trigger checks for
   // an existing chart and either re-enters onboarding (new user) or sends
@@ -426,6 +441,10 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       </KeyboardAvoidingView>
 
       <ImageLightbox uri={lightboxUri} onClose={() => setLightboxUri(null)} />
+
+      {/* Admin-only one-shot build banner — fades in when a new deploy
+          has landed since this user last opened the app. */}
+      <AdminBuildBanner isAdmin={isAdmin} build={adminBuild} />
     </View>
   );
 }
