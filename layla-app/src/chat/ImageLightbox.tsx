@@ -14,6 +14,7 @@ import {
   Dimensions,
   Easing,
   Image,
+  Keyboard,
   Modal,
   PanResponder,
   Platform,
@@ -40,6 +41,10 @@ export function ImageLightbox({ uri, onClose }: Props) {
 
   useEffect(() => {
     if (!visible) return;
+    // Dismiss the chat input's keyboard so it doesn't come back when our
+    // Alert ("Saved") dismisses and focus naturally returns to whatever
+    // had focus before the modal opened.
+    Keyboard.dismiss();
     fade.setValue(0);
     lift.setValue(20);
     dragY.setValue(0);
