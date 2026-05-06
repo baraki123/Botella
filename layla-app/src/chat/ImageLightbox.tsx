@@ -90,11 +90,20 @@ export function ImageLightbox({ uri, onClose }: Props) {
       console.log(`[lightbox] ${msg}`, extra ?? "");
     try {
       const FS: any = await import("expo-file-system");
-      log("FS keys", Object.keys(FS).slice(0, 12));
+      log("FS keys", Object.keys(FS).join(","));
+
+      if (!FS.File || !FS.Paths) {
+        return {
+          uri: "",
+          error:
+            `expo-file-system shape unexpected (have File=${!!FS.File}, Paths=${!!FS.Paths}; ` +
+            `keys: ${Object.keys(FS).slice(0, 8).join(",")})`,
+        };
+      }
+
       const ts = Date.now();
       const filename = `layla-chart-${ts}.png`;
 
-      // Decode source bytes — base64 (data URL) or HTTP fetch.
       let bytes: Uint8Array | null = null;
       let b64: string | null = null;
       if (sourceUri.startsWith("data:")) {
@@ -108,69 +117,37 @@ export function ImageLightbox({ uri, onClose }: Props) {
         log("fetched bytes", { len: bytes.length });
       }
 
-      // Try the new SDK 54 Paths/File API first.
-      if (FS.File && FS.Paths) {
-        try {
-          const file = new FS.File(FS.Paths.document, filename);
-          try {
-            file.create({ overwrite: true, intermediates: true });
-          } catch (e: any) {
-            log("file.create threw (continuing)", e?.message);
-          }
-          if (b64 != null) {
-            file.write(b64, { encoding: "base64" });
-          } else {
-            file.write(bytes!);
-          }
-          const uri = file.uri;
-          log("new-API write done", { uri, exists: file.exists });
-          // Trust the URI — file.exists is sometimes a stale read on the
-          // freshly-written file in SDK 54. Downstream APIs (MediaLibrary,
-          // Sharing) read the file when called, so if it's actually
-          // missing they'll error with their own message.
-          if (uri) return { uri, error: null };
-        } catch (e: any) {
-          log("new-API path threw, falling back", e?.message);
+      const docDir = FS.Paths.document;
+      log("docDir.uri", docDir?.uri);
+      const file = new FS.File(docDir, filename);
+      log("file.uri before create", file.uri);
+
+      try {
+        file.create({ overwrite: true, intermediates: true });
+        log("file.create ok");
+      } catch (e: any) {
+        // create can throw if the file already exists despite overwrite=true
+        // on some build configs — write() can still succeed.
+        log("file.create threw (continuing)", e?.message);
+      }
+
+      try {
+        if (b64 != null) {
+          file.write(b64, { encoding: "base64" });
+        } else {
+          file.write(bytes!);
         }
+        log("file.write ok");
+      } catch (e: any) {
+        return { uri: "", error: `file.write: ${e?.message || e}` };
       }
 
-      // Legacy API fallback. expo-file-system 19+ removed the top-level
-      // `documentDirectory` / `cacheDirectory` getters, so we source the
-      // directory URI from the new Paths class when present.
-      const dir =
-        FS.documentDirectory ||
-        FS.cacheDirectory ||
-        FS.Paths?.document?.uri ||
-        FS.Paths?.cache?.uri;
-      if (!dir) {
-        return {
-          uri: "",
-          error:
-            "no document directory exposed by expo-file-system " +
-            `(keys: ${Object.keys(FS).slice(0, 10).join(",")})`,
-        };
+      const uri = file.uri;
+      if (!uri) {
+        return { uri: "", error: "file.uri empty after write" };
       }
-      const dirWithSlash = dir.endsWith("/") ? dir : `${dir}/`;
-      const target = `${dirWithSlash}${filename}`;
-      log("legacy target", target);
-
-      if (b64 != null && FS.writeAsStringAsync) {
-        await FS.writeAsStringAsync(target, b64, {
-          encoding: FS.EncodingType?.Base64 ?? "base64",
-        });
-      } else if (FS.writeAsStringAsync) {
-        let bin = "";
-        for (let i = 0; i < bytes!.length; i++) bin += String.fromCharCode(bytes![i]);
-        // @ts-ignore — btoa exists in RN's Hermes runtime
-        const b64FromBytes = (globalThis.btoa || ((s: string) => Buffer.from(s, "binary").toString("base64")))(bin);
-        await FS.writeAsStringAsync(target, b64FromBytes, {
-          encoding: FS.EncodingType?.Base64 ?? "base64",
-        });
-      } else {
-        return { uri: "", error: "writeAsStringAsync not available" };
-      }
-      log("legacy write returned");
-      return { uri: target, error: null };
+      log("returning uri", uri);
+      return { uri, error: null };
     } catch (e: any) {
       log("materializeFile threw", e?.message);
       return { uri: "", error: e?.message || String(e) };
