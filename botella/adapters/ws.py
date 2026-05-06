@@ -12,21 +12,34 @@ Wire shape:
 
 One socket per connected user. The dispatcher runs once per inbound frame; all
 events for that turn stream out before the next inbound frame is processed.
+
+If a single state takes a long time (chart computation + Claude calls can
+total 30-40s), no frames flow during that window and proxies / mobile
+networks happily drop the idle socket. The keep-alive wrapper below
+injects a typing frame every IDLE_KEEPALIVE seconds while the runtime is
+busy, so the proxy sees traffic and the socket survives.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 from botella import runtime
 from botella.auth.jwt import JWTError, verify_jwt
-from botella.contract import BotManifest, InboundMessage
+from botella.contract import BotManifest, InboundMessage, OutboundEvent
 
 log = logging.getLogger(__name__)
+
+# Send a no-op `typing` frame every N seconds while the runtime is busy.
+# Has to be well under the tightest idle timeout in any link of the chain
+# (Istio/Envoy default is 1h; mobile carriers and Cloudflare can be as
+# low as 30s). 8s gives us plenty of margin without flooding the line.
+IDLE_KEEPALIVE = 8.0
 
 
 def build_ws_router(manifest: BotManifest) -> APIRouter:
@@ -60,7 +73,7 @@ def build_ws_router(manifest: BotManifest) -> APIRouter:
                     voice_origin=bool(body.get("voice_origin", False)),
                 )
 
-                async for event in runtime.run(msg, manifest):
+                async for event in _with_keepalive(runtime.run(msg, manifest)):
                     payload = _scrub(event.payload)
                     await ws.send_json({"type": event.type, "payload": payload})
 
@@ -77,6 +90,49 @@ def build_ws_router(manifest: BotManifest) -> APIRouter:
                 pass
 
     return router
+
+
+async def _with_keepalive(
+    source: AsyncIterator[OutboundEvent],
+) -> AsyncIterator[OutboundEvent]:
+    """Pass events from `source` straight through, but inject a `typing`
+    frame every IDLE_KEEPALIVE seconds when the runtime is silent. The
+    iOS client treats consecutive typing events as one (already-on dots
+    just stay on), so callers see no visible change — proxies do, and
+    don't drop the socket during a slow chart build."""
+    queue: asyncio.Queue = asyncio.Queue()
+    DONE: object = object()
+    FAIL: object = object()
+
+    async def _drain() -> None:
+        try:
+            async for ev in source:
+                await queue.put(ev)
+        except Exception as e:
+            await queue.put((FAIL, e))
+        finally:
+            await queue.put(DONE)
+
+    task = asyncio.create_task(_drain())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=IDLE_KEEPALIVE)
+            except asyncio.TimeoutError:
+                yield OutboundEvent(type="typing", payload={})
+                continue
+            if item is DONE:
+                return
+            if isinstance(item, tuple) and item and item[0] is FAIL:
+                raise item[1]
+            yield item
+    finally:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 def _scrub(payload: dict[str, Any]) -> dict[str, Any]:
