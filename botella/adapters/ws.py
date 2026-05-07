@@ -57,21 +57,30 @@ def build_ws_router(manifest: BotManifest) -> APIRouter:
 
         await ws.accept()
 
-        # ─── Auto-resume on connect (mid-flow users only) ──────────────
-        # When an existing session is mid-flow, synthesize an internal
-        # /start so the trigger's resume gates fire (re-emit current
-        # section / rerun LLM / Stay / etc.). This means an iOS app that
-        # reconnects after a network blip or after being backgrounded
-        # sees its current state without depending on the client's
-        # one-shot auto-/start logic firing again.
+        # ─── Auto-resume on connect (state-restoring resumes only) ─────
+        # Synthesize an internal /start so the trigger's resume gates
+        # fire — but ONLY when there's actual restorable state (sections
+        # or chart_data in an active onboarding flow). This catches the
+        # network-blip / iOS-backgrounded case where the user lost a
+        # render but the server has progress to push back.
         #
-        # For fresh users (no session.flow yet) we skip this — the iOS
-        # client's first /start will drive normal onboarding entry, and
-        # tests that expect their first ws.send_json to be the only
-        # /start in flight don't get a surprise event from us.
+        # We deliberately skip:
+        #  - fresh users (no flow): iOS will fire /start on its own
+        #  - completed-but-stuck-flow remnants (no sections/chart): the
+        #    /start trigger's recovery gate will handle these on the
+        #    iOS-driven /start; pushing here would just race with iOS
+        #    and produce a duplicate Claude call (e.g. two checkin
+        #    openers, charged twice).
         try:
             existing = await manifest.storage.load_session(user_id)
-            if existing.flow is not None:
+            should_push = (
+                existing.flow == "onboarding"
+                and (
+                    bool(existing.data.get("sections"))
+                    or bool(existing.data.get("chart_data"))
+                )
+            )
+            if should_push:
                 resume_msg = InboundMessage(
                     user_id=user_id,
                     transport="ws_resume",
