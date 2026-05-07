@@ -51,6 +51,9 @@ export default function App() {
     setRoute("signin");
   }
 
+  // Keep ChatScreen mounted whenever we have a session — Settings overlays
+  // on top instead of swapping. Unmounting ChatScreen wipes its message
+  // state, so coming back from Settings would land on an empty thread.
   let body;
   if (loading) {
     body = (
@@ -58,17 +61,22 @@ export default function App() {
         <ActivityIndicator />
       </View>
     );
-  } else if (route === "signin" || !session) {
+  } else if (!session || route === "signin") {
     body = <SignInScreen onSignedIn={handleSignedIn} />;
-  } else if (route === "settings") {
-    body = (
-      <SettingsScreen
-        onSignedOut={handleSignedOut}
-        onClose={() => setRoute("chat")}
-      />
-    );
   } else {
-    body = <ChatScreen onOpenSettings={() => setRoute("settings")} />;
+    body = (
+      <View style={styles.fill}>
+        <ChatScreen onOpenSettings={() => setRoute("settings")} />
+        {route === "settings" ? (
+          <View style={StyleSheet.absoluteFillObject}>
+            <SettingsScreen
+              onSignedOut={handleSignedOut}
+              onClose={() => setRoute("chat")}
+            />
+          </View>
+        ) : null}
+      </View>
+    );
   }
 
   // SafeAreaView only owns the TOP edge here. The chat screen owns its own
@@ -87,5 +95,6 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
+  fill: { flex: 1 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
 });
