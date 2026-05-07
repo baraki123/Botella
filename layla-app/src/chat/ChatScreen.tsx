@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -92,18 +92,27 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   // user reads from the start instead of landing in the middle/end.
   const messageHeightsRef = useRef<Map<string, number>>(new Map());
   const listHeightRef = useRef(0);
-  // Track the message we last anchored AND the height at the moment of
-  // anchor. Markdown rendering can fire onLayout multiple times as text
-  // children settle, and the FIRST measurement may be smaller than the
-  // final one — if we memoize the early decision based on a small height,
-  // we miss that the message is actually too tall to fit. So we re-anchor
-  // when a later layout reveals significantly more height.
-  const lastAnchoredIdRef = useRef<string | null>(null);
-  const lastAnchoredHeightRef = useRef(0);
+  // Decision per message id — "top" or "bottom". Once a message is
+  // anchored to the top of the viewport, later onLayout fires with even
+  // larger heights stay anchored top (no-op). A message that started
+  // "bottom" (small initial measurement) but then grew past the
+  // half-viewport threshold is RE-anchored to top. We never flip back
+  // from top → bottom, so the screen doesn't jump after the user is
+  // already reading a long section.
+  const scrollDecisionRef = useRef<Map<string, "top" | "bottom">>(new Map());
   // Mirror of `messages` state so the height-callback can read the
-  // current array without going stale across renders.
+  // current array without going stale across renders. CRITICAL — this
+  // must be `useLayoutEffect`, not `useEffect`. Reasoning:
+  //   * setMessages → React re-renders the FlatList with the new item.
+  //   * Layout pass runs; the new bubble's `onLayout` fires synchronously.
+  //   * recordMessageHeight reads messagesRef to find the new bubble's
+  //     index, decide whether to scroll-to-top, etc.
+  // With useEffect, the ref-update fires AFTER paint, so onLayout sees
+  // the OLD array — finds no matching id, returns early, never scrolls.
+  // useLayoutEffect runs synchronously after render before paint, so the
+  // ref is in sync by the time the new bubble's onLayout fires.
   const messagesRef = useRef<Message[]>([]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
@@ -170,40 +179,50 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     messageHeightsRef.current.set(id, height);
     if (userOverrideRef.current) return;
     const arr = messagesRef.current;
-    const last = arr[arr.length - 1];
-    if (!last || last.id !== id) return;
-    if (last.role === "user") return;       // user bubbles always sticky-bottom
-    if (last.streaming) return;             // wait for streaming to finish
-
-    // If we already anchored for this id, skip — UNLESS the rendered
-    // height has grown significantly since then (markdown reflows can
-    // arrive in multiple passes; the first measurement is sometimes
-    // before all children have laid out). 60px is roughly two body
-    // lines — enough to flip a "fits" decision into "anchor top".
-    if (
-      lastAnchoredIdRef.current === id
-      && height <= lastAnchoredHeightRef.current + 60
-    ) {
-      return;
-    }
+    // Find this message in the current array. The mirror is updated
+    // via useLayoutEffect so it's in sync by the time onLayout fires.
+    const idx = arr.findIndex(m => m.id === id);
+    if (idx === -1) return;             // not in array yet (rare race)
+    if (idx !== arr.length - 1) return; // only auto-scroll for the LATEST
+    const msg = arr[idx];
+    if (msg.role === "user") return;    // user bubbles always sticky-bottom
+    if (msg.streaming) return;          // wait for streaming to finish
 
     const viewH = listHeightRef.current;
-    // Threshold: anything taking up more than ~half the viewport is
-    // tall enough that the user wants to read it top-down, not have it
-    // dropped at the bottom of the list. This catches typical chapter
-    // sections (200–400px on a phone), which would otherwise sticky-
-    // bottom and force the user to scroll up to the start.
-    if (viewH > 0 && height > viewH * 0.5) {
+    if (viewH <= 0) return;             // FlatList not laid out yet
+    // Threshold: anything taking more than ~half the viewport is tall
+    // enough that the user wants to read it top-down, not have it
+    // dropped at the bottom. This catches typical chapter sections
+    // (300–600px on a phone), which would otherwise sticky-bottom and
+    // force the user to scroll up to the start of the new bubble.
+    const wantsTop = height > viewH * 0.5;
+    const prev = scrollDecisionRef.current.get(id);
+
+    // Re-evaluate cases:
+    //  - First time seeing this id (prev undefined): scroll once.
+    //  - Was bottom, now wantsTop: bubble grew past threshold during
+    //    markdown reflow → re-anchor to top.
+    //  - Was top: stay anchored top (no-op even if height shrinks
+    //    later, so we don't pull the user away from where they're
+    //    reading).
+    let target: "top" | "bottom" | null = null;
+    if (prev === undefined) {
+      target = wantsTop ? "top" : "bottom";
+    } else if (prev === "bottom" && wantsTop) {
+      target = "top";
+    }
+    if (target === null) return;
+
+    if (target === "top") {
       listRef.current?.scrollToIndex({
-        index: arr.length - 1,
+        index: idx,
         viewPosition: 0,
         animated: true,
       });
     } else {
       listRef.current?.scrollToEnd({ animated: true });
     }
-    lastAnchoredIdRef.current = id;
-    lastAnchoredHeightRef.current = height;
+    scrollDecisionRef.current.set(id, target);
   }, []);
 
   const handleListLayout = useCallback((e: LayoutChangeEvent) => {
