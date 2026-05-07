@@ -40,9 +40,11 @@ const TERMS_URL = "https://layla.app/terms";
 export interface SettingsScreenProps {
   onSignedOut: () => void;
   onAccountSwitched?: () => void;
+  /** Called when the user taps the back button to return to the chat. */
+  onClose?: () => void;
 }
 
-export function SettingsScreen({ onSignedOut, onAccountSwitched }: SettingsScreenProps) {
+export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: SettingsScreenProps) {
   const [provider, setProvider] = useState<string | null>(null);
   const [busy, setBusy] = useState<
     "signout" | "delete" | "link" | "tg-link" | null
@@ -203,7 +205,22 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched }: SettingsScree
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Text style={styles.heading}>Settings</Text>
+      <View style={styles.headerRow}>
+        {onClose ? (
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Back to chat"
+            style={({ pressed }) => [
+              styles.backButton,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Text style={styles.backButtonText}>‹ Back</Text>
+          </Pressable>
+        ) : null}
+        <Text style={styles.heading}>Settings</Text>
+      </View>
 
       <Section title="Account">
         <Row label="Signed in with" value={provider === "apple" ? "Apple" : "Anonymous device"} />
@@ -349,8 +366,23 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontFamily: theme.fontSerifItalic,
     color: theme.text,
-    marginBottom: 28,
     letterSpacing: 0.4,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 28,
+  },
+  backButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginLeft: -8,
+  },
+  backButtonText: {
+    color: theme.accent,
+    fontSize: 18,
+    letterSpacing: 0.3,
   },
   section: { marginBottom: 24 },
   sectionTitle: {

@@ -183,10 +183,29 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     // via useLayoutEffect so it's in sync by the time onLayout fires.
     const idx = arr.findIndex(m => m.id === id);
     if (idx === -1) return;             // not in array yet (rare race)
-    if (idx !== arr.length - 1) return; // only auto-scroll for the LATEST
     const msg = arr[idx];
     if (msg.role === "user") return;    // user bubbles always sticky-bottom
     if (msg.streaming) return;          // wait for streaming to finish
+    // Skip empty bot bubbles. The server emits chips as a separate
+    // quick_replies event AFTER the section text, and the iOS handler
+    // adds it as a near-empty bot message (text="" or just the chip
+    // prompt). Those bubbles render as invisible chrome since chips
+    // actually display in the sticky row above the Composer — but
+    // they DO sit at arr.length-1, which previously caused the
+    // section text's auto-scroll to bail. We now ignore the empty
+    // ones entirely and anchor against the substantive content.
+    const isSubstantive = (m: Message) =>
+      m.role === "bot" && !!m.text && m.text.trim().length > 0;
+    if (!isSubstantive(msg)) return;
+
+    // Only act when THIS message is the latest substantive bot bubble.
+    // (Earlier substantive messages don't auto-scroll on later layout
+    // fires — they're settled.)
+    let latestSubstantiveIdx = -1;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (isSubstantive(arr[i])) { latestSubstantiveIdx = i; break; }
+    }
+    if (idx !== latestSubstantiveIdx) return;
 
     const viewH = listHeightRef.current;
     if (viewH <= 0) return;             // FlatList not laid out yet

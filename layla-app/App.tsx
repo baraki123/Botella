@@ -61,7 +61,12 @@ export default function App() {
   } else if (route === "signin" || !session) {
     body = <SignInScreen onSignedIn={handleSignedIn} />;
   } else if (route === "settings") {
-    body = <SettingsScreen onSignedOut={handleSignedOut} />;
+    body = (
+      <SettingsScreen
+        onSignedOut={handleSignedOut}
+        onClose={() => setRoute("chat")}
+      />
+    );
   } else {
     body = <ChatScreen onOpenSettings={() => setRoute("settings")} />;
   }
