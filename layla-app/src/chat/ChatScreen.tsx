@@ -124,7 +124,13 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       if (atBottom) {
         userOverrideRef.current = false;
       }
-      showPill(!atBottom && messages.length > 0);
+      // "↓ Latest" pill is only useful when the user has scrolled FAR
+      // away — paginating sections is a normal forward read motion,
+      // and the pill in that case is just noise. Show it only when
+      // they're more than one full viewport above the bottom (i.e.
+      // they've actively scrolled up to re-read something earlier).
+      const farFromBottom = distanceFromBottom > layoutMeasurement.height;
+      showPill(farFromBottom && messages.length > 0);
     },
     [messages.length, showPill],
   );
@@ -159,12 +165,17 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       const viewH = listHeightRef.current;
       const offY = scrollOffsetYRef.current;
       const distanceFromBottom = Math.max(0, height - viewH - offY);
-      const newlyOffBottom = distanceFromBottom > 60 && (last && messagesRef.current.length > 0);
+      // Same threshold as handleScroll's "far from bottom" — the pill
+      // only surfaces when the user is more than one full viewport
+      // above the bottom (they've actively scrolled away to re-read).
+      // Normal paginated section reveals don't trigger it.
+      const farFromBottom =
+        viewH > 0
+        && distanceFromBottom > viewH
+        && (last && messagesRef.current.length > 0);
 
       if (userOverrideRef.current) {
-        // User has actively scrolled away. Never auto-follow. But do
-        // surface the pill so they know there's new content below.
-        if (newlyOffBottom) {
+        if (farFromBottom) {
           isAtBottomRef.current = false;
           showPill(true);
         }
@@ -175,7 +186,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       if (last.streaming) {
         if (isAtBottomRef.current) {
           listRef.current?.scrollToEnd({ animated: true });
-        } else if (newlyOffBottom) {
+        } else if (farFromBottom) {
           showPill(true);
         }
         return;
@@ -183,14 +194,14 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       if (last.role === "user") {
         if (isAtBottomRef.current) {
           listRef.current?.scrollToEnd({ animated: true });
-        } else if (newlyOffBottom) {
+        } else if (farFromBottom) {
           showPill(true);
         }
         return;
       }
-      // Completed bot bubble — leave the viewport stable. Surface the
-      // pill if the new bubble extends beyond what's visible.
-      if (newlyOffBottom) {
+      // Completed bot bubble — leave the viewport stable. Pill surfaces
+      // ONLY if the user is far above (one full viewport up).
+      if (farFromBottom) {
         isAtBottomRef.current = false;
         showPill(true);
       }
