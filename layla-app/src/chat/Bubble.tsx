@@ -152,7 +152,17 @@ export function Bubble({ message, onImagePress }: Props) {
 }
 
 function stripHtml(s: string): string {
-  return s.replace(/<\/?[^>]+>/g, "");
+  // Server emits a mix of Telegram-flavored HTML (`<b>`, `<i>`) and
+  // markdown (`**bold**`, `## Heading`) depending on the surface. Telegram
+  // renders HTML natively; the iOS Markdown component renders markdown.
+  // Convert the simple HTML emphases into their markdown equivalents
+  // BEFORE stripping the rest, so Layla's emphasis survives both paths.
+  return s
+    .replace(/<b>([\s\S]*?)<\/b>/gi, "**$1**")
+    .replace(/<strong>([\s\S]*?)<\/strong>/gi, "**$1**")
+    .replace(/<i>([\s\S]*?)<\/i>/gi, "*$1*")
+    .replace(/<em>([\s\S]*?)<\/em>/gi, "*$1*")
+    .replace(/<\/?[^>]+>/g, "");
 }
 
 const styles = StyleSheet.create({
@@ -272,13 +282,18 @@ const markdownStyles = {
     letterSpacing: 0.4,
   },
   heading2: {
+    // The first map read uses ## headers ("Deep Realization", "Executive
+    // Summary", "Core Instruction" …). Serif display face + warmer line
+    // height gives them ceremony — they read as chapter titles, not
+    // chat-section headers.
     color: theme.accent,
-    fontSize: 20,
-    lineHeight: 28,
-    fontWeight: "600" as const,
-    marginTop: 6,
-    marginBottom: 10,
-    letterSpacing: 0.3,
+    fontFamily: theme.fontSerif,
+    fontSize: 22,
+    lineHeight: 30,
+    fontWeight: "500" as const,
+    marginTop: 14,
+    marginBottom: 12,
+    letterSpacing: 0.5,
   },
   heading3: {
     color: theme.accent,
@@ -299,9 +314,10 @@ const markdownStyles = {
   },
   strong: {
     fontWeight: "700" as const,
-    // Bold tokens (planet names, key claims) get a hint of gold so they
-    // pop out of the body without yelling.
-    color: theme.bubbleBotText,
+    // Bold tokens (placement names, key claims) tinted toward warm gold
+    // so they catch the eye without yelling. Slightly less saturated
+    // than the chip / heading gold so body text doesn't shimmer.
+    color: "#E5C28F",
   },
   em: {
     fontStyle: "italic" as const,

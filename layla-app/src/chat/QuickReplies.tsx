@@ -78,6 +78,14 @@ function Chip({
   const isUrl = typeof option !== "string" && "url" in option;
   const label =
     typeof option === "string" ? option : option.label;
+  // Doorway chips (post-map-read pivot) get a more contemplative
+  // styling — softer glow, serif label, larger touch target. Recognised
+  // by the stable `__doorway_*` value tokens emitted by the server.
+  const isDoorway =
+    typeof option !== "string" &&
+    "value" in option &&
+    typeof option.value === "string" &&
+    option.value.startsWith("__doorway_");
 
   const handlePress = () => {
     if (typeof option === "string") {
@@ -102,10 +110,14 @@ function Chip({
         style={({ pressed }) => [
           styles.chip,
           isUrl && styles.chipUrl,
+          isDoorway && styles.chipDoorway,
           pressed && styles.chipPressed,
+          pressed && isDoorway && styles.chipDoorwayPressed,
         ]}
       >
-        <Text style={styles.chipText}>{label}</Text>
+        <Text style={[styles.chipText, isDoorway && styles.chipDoorwayText]}>
+          {label}
+        </Text>
         {isUrl ? <ExternalArrow /> : null}
       </Pressable>
     </Animated.View>
@@ -170,6 +182,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500" as const,
     letterSpacing: 0.3,
+  },
+  // Doorway chips — bigger, more contemplative. Appears once after the
+  // first map read; shouldn't blend in with chat-flow chips. Soft gold
+  // halo on rest, brighter halo on press.
+  chipDoorway: {
+    paddingVertical: 13,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    backgroundColor: theme.surfaceRaised,
+    borderColor: theme.accentDim,
+    shadowColor: theme.accent,
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  chipDoorwayPressed: {
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+  },
+  chipDoorwayText: {
+    fontFamily: theme.fontSerif,
+    fontSize: 16,
+    fontWeight: "500" as const,
+    letterSpacing: 0.35,
   },
   arrowWrap: { width: 11, height: 11 },
 });
