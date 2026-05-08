@@ -91,23 +91,10 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const scrollOffsetYRef = useRef(0);
   const pillOpacity = useRef(new Animated.Value(0)).current;
 
-  // Per-message rendered height (keyed by message id) + the FlatList's
-  // viewport height. Heights are recorded for potential future
-  // diagnostics; current scroll behavior doesn't auto-anchor based on
-  // them — see recordMessageHeight + handleContentSizeChange comments.
-  const messageHeightsRef = useRef<Map<string, number>>(new Map());
   const listHeightRef = useRef(0);
-  // Mirror of `messages` state so the height-callback can read the
-  // current array without going stale across renders. CRITICAL — this
-  // must be `useLayoutEffect`, not `useEffect`. Reasoning:
-  //   * setMessages → React re-renders the FlatList with the new item.
-  //   * Layout pass runs; the new bubble's `onLayout` fires synchronously.
-  //   * recordMessageHeight reads messagesRef to find the new bubble's
-  //     index, decide whether to scroll-to-top, etc.
-  // With useEffect, the ref-update fires AFTER paint, so onLayout sees
-  // the OLD array — finds no matching id, returns early, never scrolls.
-  // useLayoutEffect runs synchronously after render before paint, so the
-  // ref is in sync by the time the new bubble's onLayout fires.
+  // Mirror of `messages` state for FlatList callbacks that need fresh
+  // state without re-rendering. Updated via useLayoutEffect so the
+  // mirror is in sync before paint.
   const messagesRef = useRef<Message[]>([]);
   useLayoutEffect(() => {
     messagesRef.current = messages;
@@ -211,24 +198,9 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     [showPill],
   );
 
-  const recordMessageHeight = useCallback((id: string, height: number) => {
-    // Just record the height; no auto-scroll on completed bot bubbles.
-    //
-    // Earlier this callback decided whether to scrollToIndex(top of new
-    // long bubble) vs scrollToEnd. Both yanked the user out of their
-    // current reading position when a new bubble landed — they'd see
-    // the new content but lose track of where they had been reading,
-    // and feel a "did I miss something above?" instinct. The desired
-    // behavior is simpler: when new content arrives, leave the
-    // viewport exactly where the user is looking. The "Latest" pill
-    // already surfaces (via handleScroll) so they can choose to jump
-    // forward when ready.
-    //
-    // Streaming tokens (Layla's chat replies) still sticky-bottom
-    // follow via handleContentSizeChange's `last.streaming` branch —
-    // those are short and user-anticipated, not jarring.
-    messageHeightsRef.current.set(id, height);
-  }, []);
+  // No per-row scroll behavior. Auto-scroll runs purely off
+  // handleContentSizeChange (sticky-bottom while at-bottom) so the
+  // viewport stays where the user is looking when new bubbles land.
 
   const handleListLayout = useCallback((e: LayoutChangeEvent) => {
     listHeightRef.current = e.nativeEvent.layout.height;
@@ -549,17 +521,9 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             data={messages}
             keyExtractor={(m) => m.id}
             renderItem={({ item }) => (
-              <View
-                onLayout={(e) =>
-                  recordMessageHeight(item.id, e.nativeEvent.layout.height)
-                }
-              >
-                <Bubble message={item} onImagePress={setLightboxUri} />
-                {/* Quick-reply chips render in a sticky row above the
-                    Composer (see below) so the keyboard never hides
-                    them. Inline rendering inside the bubble is
-                    intentionally skipped. */}
-              </View>
+              // Quick-reply chips render in a sticky row above the
+              // Composer (see below) so the keyboard never hides them.
+              <Bubble message={item} onImagePress={setLightboxUri} />
             )}
             ListFooterComponent={showTyping ? <TypingIndicator /> : null}
             keyboardShouldPersistTaps="handled"

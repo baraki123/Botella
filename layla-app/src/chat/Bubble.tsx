@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
 // @ts-ignore — no shipped types
 import Markdown from "react-native-markdown-display";
@@ -28,7 +28,9 @@ interface Props {
  */
 export function Bubble({ message, onImagePress }: Props) {
   const isUser = message.role === "user";
-  const text = stripHtml(message.text);
+  // Memoize per-bubble so streaming-token re-renders + chat-state
+  // updates don't re-walk the regex chain on every paint of every row.
+  const text = useMemo(() => stripHtml(message.text), [message.text]);
   // Image-only Layla messages render edge-to-edge (no gold dot, no
   // text-bubble padding) so the chart fills the chat width and feels
   // like a centerpiece, not a thumbnail tucked next to a paragraph.
