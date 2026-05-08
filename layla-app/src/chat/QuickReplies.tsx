@@ -183,27 +183,25 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
     letterSpacing: 0.3,
   },
-  // Doorway chips — bigger, more contemplative. Appears once after the
-  // first map read; shouldn't blend in with chat-flow chips. Soft gold
-  // halo on rest, brighter halo on press.
+  // Doorway chips — slightly distinct from chat-flow chips (serif label,
+  // soft gold halo) but the SAME size. The previous version was too
+  // tall/wide and ate half the screen; now it just reads with the
+  // ceremony of the typography, not the bulk of the chrome.
   chipDoorway: {
-    paddingVertical: 13,
-    paddingHorizontal: 18,
-    borderRadius: 14,
     backgroundColor: theme.surfaceRaised,
     borderColor: theme.accentDim,
     shadowColor: theme.accent,
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 0 },
   },
   chipDoorwayPressed: {
-    shadowOpacity: 0.55,
-    shadowRadius: 12,
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
   },
   chipDoorwayText: {
     fontFamily: theme.fontSerif,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "500" as const,
     letterSpacing: 0.35,
   },
