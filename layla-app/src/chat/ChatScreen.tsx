@@ -83,23 +83,20 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   // React state churn during fast streams.
   const isAtBottomRef = useRef(true);
   const userOverrideRef = useRef(false); // user manually scrolled away
+  // Mirror of the FlatList's scroll offset so handleContentSizeChange can
+  // recompute distance-from-bottom when new content arrives without
+  // waiting for a fresh user scroll event. Without this, the "Latest"
+  // pill stays hidden if a long bubble lands BELOW the viewport while
+  // the user is reading further up.
+  const scrollOffsetYRef = useRef(0);
   const pillOpacity = useRef(new Animated.Value(0)).current;
 
   // Per-message rendered height (keyed by message id) + the FlatList's
-  // viewport height. Used to decide where to scroll when a new bot
-  // message arrives: short message → bottom (sticky); tall message
-  // (won't fit comfortably) → align its TOP to the viewport top so the
-  // user reads from the start instead of landing in the middle/end.
+  // viewport height. Heights are recorded for potential future
+  // diagnostics; current scroll behavior doesn't auto-anchor based on
+  // them — see recordMessageHeight + handleContentSizeChange comments.
   const messageHeightsRef = useRef<Map<string, number>>(new Map());
   const listHeightRef = useRef(0);
-  // Decision per message id — "top" or "bottom". Once a message is
-  // anchored to the top of the viewport, later onLayout fires with even
-  // larger heights stay anchored top (no-op). A message that started
-  // "bottom" (small initial measurement) but then grew past the
-  // half-viewport threshold is RE-anchored to top. We never flip back
-  // from top → bottom, so the screen doesn't jump after the user is
-  // already reading a long section.
-  const scrollDecisionRef = useRef<Map<string, "top" | "bottom">>(new Map());
   // Mirror of `messages` state so the height-callback can read the
   // current array without going stale across renders. CRITICAL — this
   // must be `useLayoutEffect`, not `useEffect`. Reasoning:
@@ -130,6 +127,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      scrollOffsetYRef.current = contentOffset.y;
       const distanceFromBottom = Math.max(
         0,
         contentSize.height - layoutMeasurement.height - contentOffset.y,
@@ -151,97 +149,85 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     userOverrideRef.current = true;
   }, []);
 
-  const handleContentSizeChange = useCallback(() => {
-    // Fires on every list-content size change (new message, streaming
-    // token append, typing indicator toggle). Sticky-bottom: scroll only
-    // if the user hasn't manually scrolled away.
-    //
-    // For BOT messages we don't scroll here — `recordMessageHeight`
-    // does the smart anchor (top-of-message vs bottom-of-list) once
-    // it sees the message's measured height via onLayout. For user
-    // messages and streaming token appends we still scrollToEnd
-    // because they're guaranteed-short and the user expects them at
-    // the bottom.
-    if (userOverrideRef.current) return;
-    const last = messagesRef.current[messagesRef.current.length - 1];
-    if (!last || last.role === "user") {
-      listRef.current?.scrollToEnd({ animated: true });
-      return;
-    }
-    if (last.streaming) {
-      listRef.current?.scrollToEnd({ animated: true });
-      return;
-    }
-    // Bot message that's done streaming — defer to recordMessageHeight.
-  }, []);
+  const handleContentSizeChange = useCallback(
+    (_w: number, height: number) => {
+      // Behavior per content type:
+      //   - Streaming bot tokens (Layla's chat reply unfolding): sticky
+      //     bottom while user is at-bottom. Standard chat UX — user
+      //     watches the answer arrive in real time.
+      //   - User message echo (typed send OR chip tap): scroll to end
+      //     only if user was already at the bottom. Mid-reading users
+      //     don't get yanked.
+      //   - Completed bot bubble (first-map section, post-map pause,
+      //     headline, etc.): NEVER auto-scroll. Viewport stays where
+      //     the user is looking.
+      //
+      // For ANY new content that lands below the user's current
+      // viewport, surface the "Latest" pill so they have an explicit
+      // jump-forward affordance (handleScroll only fires on user
+      // gestures, not on programmatic content growth).
+      const last = messagesRef.current[messagesRef.current.length - 1];
+
+      // Check whether the new content extends beyond the viewport.
+      const viewH = listHeightRef.current;
+      const offY = scrollOffsetYRef.current;
+      const distanceFromBottom = Math.max(0, height - viewH - offY);
+      const newlyOffBottom = distanceFromBottom > 60 && (last && messagesRef.current.length > 0);
+
+      if (userOverrideRef.current) {
+        // User has actively scrolled away. Never auto-follow. But do
+        // surface the pill so they know there's new content below.
+        if (newlyOffBottom) {
+          isAtBottomRef.current = false;
+          showPill(true);
+        }
+        return;
+      }
+
+      if (!last) return;
+      if (last.streaming) {
+        if (isAtBottomRef.current) {
+          listRef.current?.scrollToEnd({ animated: true });
+        } else if (newlyOffBottom) {
+          showPill(true);
+        }
+        return;
+      }
+      if (last.role === "user") {
+        if (isAtBottomRef.current) {
+          listRef.current?.scrollToEnd({ animated: true });
+        } else if (newlyOffBottom) {
+          showPill(true);
+        }
+        return;
+      }
+      // Completed bot bubble — leave the viewport stable. Surface the
+      // pill if the new bubble extends beyond what's visible.
+      if (newlyOffBottom) {
+        isAtBottomRef.current = false;
+        showPill(true);
+      }
+    },
+    [showPill],
+  );
 
   const recordMessageHeight = useCallback((id: string, height: number) => {
+    // Just record the height; no auto-scroll on completed bot bubbles.
+    //
+    // Earlier this callback decided whether to scrollToIndex(top of new
+    // long bubble) vs scrollToEnd. Both yanked the user out of their
+    // current reading position when a new bubble landed — they'd see
+    // the new content but lose track of where they had been reading,
+    // and feel a "did I miss something above?" instinct. The desired
+    // behavior is simpler: when new content arrives, leave the
+    // viewport exactly where the user is looking. The "Latest" pill
+    // already surfaces (via handleScroll) so they can choose to jump
+    // forward when ready.
+    //
+    // Streaming tokens (Layla's chat replies) still sticky-bottom
+    // follow via handleContentSizeChange's `last.streaming` branch —
+    // those are short and user-anticipated, not jarring.
     messageHeightsRef.current.set(id, height);
-    if (userOverrideRef.current) return;
-    const arr = messagesRef.current;
-    // Find this message in the current array. The mirror is updated
-    // via useLayoutEffect so it's in sync by the time onLayout fires.
-    const idx = arr.findIndex(m => m.id === id);
-    if (idx === -1) return;             // not in array yet (rare race)
-    const msg = arr[idx];
-    if (msg.role === "user") return;    // user bubbles always sticky-bottom
-    if (msg.streaming) return;          // wait for streaming to finish
-    // Skip empty bot bubbles. The server emits chips as a separate
-    // quick_replies event AFTER the section text, and the iOS handler
-    // adds it as a near-empty bot message (text="" or just the chip
-    // prompt). Those bubbles render as invisible chrome since chips
-    // actually display in the sticky row above the Composer — but
-    // they DO sit at arr.length-1, which previously caused the
-    // section text's auto-scroll to bail. We now ignore the empty
-    // ones entirely and anchor against the substantive content.
-    const isSubstantive = (m: Message) =>
-      m.role === "bot" && !!m.text && m.text.trim().length > 0;
-    if (!isSubstantive(msg)) return;
-
-    // Only act when THIS message is the latest substantive bot bubble.
-    // (Earlier substantive messages don't auto-scroll on later layout
-    // fires — they're settled.)
-    let latestSubstantiveIdx = -1;
-    for (let i = arr.length - 1; i >= 0; i--) {
-      if (isSubstantive(arr[i])) { latestSubstantiveIdx = i; break; }
-    }
-    if (idx !== latestSubstantiveIdx) return;
-
-    const viewH = listHeightRef.current;
-    if (viewH <= 0) return;             // FlatList not laid out yet
-    // Threshold: anything taking more than ~half the viewport is tall
-    // enough that the user wants to read it top-down, not have it
-    // dropped at the bottom. This catches typical chapter sections
-    // (300–600px on a phone), which would otherwise sticky-bottom and
-    // force the user to scroll up to the start of the new bubble.
-    const wantsTop = height > viewH * 0.5;
-    const prev = scrollDecisionRef.current.get(id);
-
-    // Re-evaluate cases:
-    //  - First time seeing this id (prev undefined): scroll once.
-    //  - Was bottom, now wantsTop: bubble grew past threshold during
-    //    markdown reflow → re-anchor to top.
-    //  - Was top: stay anchored top (no-op even if height shrinks
-    //    later, so we don't pull the user away from where they're
-    //    reading).
-    let target: "top" | "bottom" | null = null;
-    if (prev === undefined) {
-      target = wantsTop ? "top" : "bottom";
-    } else if (prev === "bottom" && wantsTop) {
-      target = "top";
-    }
-    if (target === null) return;
-
-    if (target === "top") {
-      listRef.current?.scrollToIndex({
-        index: idx,
-        viewPosition: 0,
-        animated: true,
-      });
-    } else {
-      listRef.current?.scrollToEnd({ animated: true });
-    }
-    scrollDecisionRef.current.set(id, target);
   }, []);
 
   const handleListLayout = useCallback((e: LayoutChangeEvent) => {
@@ -508,8 +494,11 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     // "♃ My Jupiter" the value is the natural-language sentence, so we
     // display that instead — caller controls which it wants by setting
     // value === label or value !== label.
-    userOverrideRef.current = false;
-    showPill(false);
+    // Don't preemptively reset scroll state here. handleContentSizeChange
+    // will compute the right pill state once the user-msg + the bot's
+    // response land. Forcing showPill(false) before the new content
+    // arrives meant a long incoming bubble landed off-screen with no
+    // visible "↓ Latest" affordance.
     setMessages((m) => [...m, { id: uid(), role: "user", text: displayLabel }]);
     streamRef.current?.send({ text: sendValue });
   }
