@@ -595,6 +595,21 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
               }, 80);
             }}
             scrollEventThrottle={32}
+            // Chat conversations rarely exceed a few hundred messages,
+            // and the rendered cost per bubble is small (text + a gold
+            // dot). Aggressive virtualization removes earlier bubbles
+            // from the DOM when many messages arrive in close succession
+            // (e.g. the first map read emits 4 bubbles in <100ms after
+            // a long LLM call) — the user is then scrolled to the
+            // sticky-bottom and earlier messages aren't in the DOM until
+            // they scroll up. Defaults: windowSize=21, removeClippedSubviews
+            // depending on platform. We bump up so the first ~50 messages
+            // stay mounted and any sticky-bottom scroll keeps the prior
+            // bubbles available.
+            initialNumToRender={50}
+            windowSize={50}
+            maxToRenderPerBatch={30}
+            removeClippedSubviews={false}
           />
           <JumpToLatest opacity={pillOpacity} onPress={jumpToLatest} />
         </View>
