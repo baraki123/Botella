@@ -1,11 +1,22 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
 // @ts-ignore — no shipped types
 import Markdown from "react-native-markdown-display";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
+import {
+  bubbleCacheKey,
+  getCurrentJwt,
+  getVoicePlaybackEnabled,
+  subscribePlaybackState,
+  togglePlay,
+} from "../voice/playback";
 import type { Message } from "./types";
+
+// Long-form bot bubbles get a ▶ Listen affordance. Short replies don't —
+// the play button on a one-line "I'm with you" would be visual noise.
+const PLAY_BUTTON_MIN_CHARS = 220;
 
 interface Props {
   message: Message;
@@ -147,9 +158,72 @@ export function Bubble({ message, onImagePress }: Props) {
               <Markdown style={markdownStyles}>{text}</Markdown>
             )
           ) : null}
+          {!message.streaming && text.length >= PLAY_BUTTON_MIN_CHARS ? (
+            <PlayButton text={text} />
+          ) : null}
         </View>
       </View>
     </Animated.View>
+  );
+}
+
+
+// ─── ▶ Listen affordance ──────────────────────────────────────────────────
+//
+// Renders a small gold play/pause control under long bot bubbles. State
+// is owned by the playback module so multiple bubbles correctly reflect
+// "this one is playing right now". Tap-to-stop on the active bubble;
+// tap on a different bubble stops the active one and starts this one.
+
+function PlayButton({ text }: { text: string }) {
+  const cacheKey = useMemo(() => bubbleCacheKey(text), [text]);
+  const [playing, setPlaying] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = subscribePlaybackState((activeKey) => {
+      setPlaying(activeKey === cacheKey);
+    });
+    return unsubscribe;
+  }, [cacheKey]);
+
+  const onPress = async () => {
+    if (busy) return;
+    const enabled = await getVoicePlaybackEnabled();
+    if (!enabled) {
+      // Settings off — silent no-op. The toggle is in Settings ▸ Voice.
+      // No toast: the affordance discovery is enough.
+      return;
+    }
+    const jwt = await getCurrentJwt();
+    if (!jwt) return;
+    setBusy(true);
+    try {
+      await togglePlay({ text, jwt });
+    } catch {
+      // Network / synth failure — silently degrade. No toast yet; if it
+      // becomes a frequent miss we add one.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={playing ? "Stop playback" : "Listen to this reading"}
+      accessibilityState={{ busy, selected: playing }}
+      style={({ pressed }) => [
+        styles.playButton,
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      <Text style={styles.playGlyph}>{playing ? "⏸" : "▶"}</Text>
+      <Text style={styles.playLabel}>
+        {playing ? "Playing…" : busy ? "Loading…" : "Listen"}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -250,6 +324,33 @@ const styles = StyleSheet.create({
     backgroundColor: "#15101A",
   },
   caret: { opacity: 0.5, color: theme.accent },
+  playButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+    // Faint gold-tinted fill so the button reads as "Layla's voice" not a
+    // generic media control. Soft enough not to compete with the text
+    // it sits under.
+    backgroundColor: "rgba(212, 175, 90, 0.08)",
+  },
+  playGlyph: {
+    color: theme.accent,
+    fontSize: 14,
+    lineHeight: 16,
+  },
+  playLabel: {
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: "500",
+    letterSpacing: 0.3,
+  },
 });
 
 

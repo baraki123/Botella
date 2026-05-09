@@ -33,6 +33,11 @@ import {
 } from "../auth/apple";
 import { redeemLinkCode } from "../api/link";
 import { fetchMe, MeBuild } from "../api/me";
+import {
+  getVoicePlaybackEnabled,
+  setVoicePlaybackEnabled,
+  stopPlayback,
+} from "../voice/playback";
 
 const PRIVACY_URL = "https://layla.app/privacy"; // TODO: real URL before submission
 const TERMS_URL = "https://layla.app/terms";
@@ -54,6 +59,7 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: Sett
   const [tgLinkOpen, setTgLinkOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [build, setBuild] = useState<MeBuild | null>(null);
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
 
   useEffect(() => {
     currentAuthProvider().then((p) => setProvider(p ?? "anonymous"));
@@ -68,7 +74,17 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: Sett
         setBuild(me.build);
       });
     });
+    getVoicePlaybackEnabled().then(setVoiceEnabled);
   }, []);
+
+  async function handleVoiceToggle() {
+    const next = !voiceEnabled;
+    setVoiceEnabled(next);
+    await setVoicePlaybackEnabled(next);
+    // If turning off mid-playback, stop the current audio so the user
+    // doesn't have to chase it.
+    if (!next) stopPlayback();
+  }
 
   async function handleRedeemTelegramCode() {
     const code = tgCode.trim();
@@ -284,6 +300,17 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: Sett
         </Section>
       ) : null}
 
+      <Section title="Voice">
+        <ActionRow
+          label={voiceEnabled ? "Voice replies on — tap to turn off" : "Voice replies off — tap to turn on"}
+          onPress={handleVoiceToggle}
+        />
+        <Text style={styles.voiceHint}>
+          When on, long readings show a Listen button. Layla speaks them
+          in a soft, warm voice (uses your data plan).
+        </Text>
+      </Section>
+
       <Section title="About">
         <ActionRow label="Privacy policy" onPress={() => Linking.openURL(PRIVACY_URL)} />
         <ActionRow label="Terms of use" onPress={() => Linking.openURL(TERMS_URL)} />
@@ -455,6 +482,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: theme.text,
     lineHeight: 19,
+  },
+  voiceHint: {
+    fontSize: 13,
+    color: theme.textMuted,
+    lineHeight: 18,
+    paddingHorizontal: 4,
+    paddingTop: 6,
   },
   footer: {
     color: theme.textMuted,
