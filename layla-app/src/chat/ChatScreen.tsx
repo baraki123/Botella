@@ -142,72 +142,25 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     userOverrideRef.current = true;
   }, []);
 
-  const handleContentSizeChange = useCallback(
-    (_w: number, height: number) => {
-      // Behavior per content type:
-      //   - Streaming bot tokens (Layla's chat reply unfolding): sticky
-      //     bottom while user is at-bottom. Standard chat UX — user
-      //     watches the answer arrive in real time.
-      //   - User message echo (typed send OR chip tap): scroll to end
-      //     only if user was already at the bottom. Mid-reading users
-      //     don't get yanked.
-      //   - Completed bot bubble (first-map section, post-map pause,
-      //     headline, etc.): NEVER auto-scroll. Viewport stays where
-      //     the user is looking.
-      //
-      // For ANY new content that lands below the user's current
-      // viewport, surface the "Latest" pill so they have an explicit
-      // jump-forward affordance (handleScroll only fires on user
-      // gestures, not on programmatic content growth).
-      const last = messagesRef.current[messagesRef.current.length - 1];
-
-      // Check whether the new content extends beyond the viewport.
-      const viewH = listHeightRef.current;
-      const offY = scrollOffsetYRef.current;
-      const distanceFromBottom = Math.max(0, height - viewH - offY);
-      // Same threshold as handleScroll's "far from bottom" — the pill
-      // only surfaces when the user is more than one full viewport
-      // above the bottom (they've actively scrolled away to re-read).
-      // Normal paginated section reveals don't trigger it.
-      const farFromBottom =
-        viewH > 0
-        && distanceFromBottom > viewH
-        && (last && messagesRef.current.length > 0);
-
-      if (userOverrideRef.current) {
-        if (farFromBottom) {
-          isAtBottomRef.current = false;
-          showPill(true);
-        }
-        return;
-      }
-
-      if (!last) return;
-      if (last.streaming) {
-        if (isAtBottomRef.current) {
-          listRef.current?.scrollToEnd({ animated: true });
-        } else if (farFromBottom) {
-          showPill(true);
-        }
-        return;
-      }
-      if (last.role === "user") {
-        if (isAtBottomRef.current) {
-          listRef.current?.scrollToEnd({ animated: true });
-        } else if (farFromBottom) {
-          showPill(true);
-        }
-        return;
-      }
-      // Completed bot bubble — leave the viewport stable. Pill surfaces
-      // ONLY if the user is far above (one full viewport up).
-      if (farFromBottom) {
-        isAtBottomRef.current = false;
-        showPill(true);
-      }
-    },
-    [showPill],
-  );
+  const handleContentSizeChange = useCallback(() => {
+    // Sticky-bottom auto-follow ONLY for streaming tokens / user-msg
+    // echoes WHILE the user is already at-bottom. Completed bot bubbles
+    // never auto-scroll — viewport stays where the user is looking.
+    //
+    // We deliberately do NOT surface the "Latest" pill here. The pill
+    // is purely a USER-ACTION affordance: it appears when the user has
+    // actively scrolled away from the bottom (handleScroll fires).
+    // Programmatic content growth never triggers it — the user is
+    // staying where they were, content just lands below for them to
+    // scroll into when they're ready.
+    if (userOverrideRef.current) return;
+    if (!isAtBottomRef.current) return;
+    const last = messagesRef.current[messagesRef.current.length - 1];
+    if (!last) return;
+    if (last.streaming || last.role === "user") {
+      listRef.current?.scrollToEnd({ animated: true });
+    }
+  }, []);
 
   // No per-row scroll behavior. Auto-scroll runs purely off
   // handleContentSizeChange (sticky-bottom while at-bottom) so the
