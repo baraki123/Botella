@@ -114,9 +114,21 @@ If the MCP isn't restarted yet, `scripts/monitor.py` is the same capability via 
 ## Tests
 
 - **Framework tests** (this repo, `tests/`): in-memory storage, fake adapters. Fast (<10s for 72 tests). Run on every change.
-- **Layla brain tests** (sister repo, `~/Desktop/Coding/GombiStar/tests/`): `pytest -q` from there. ~166 tests; covers flows + helpers.
+- **Layla brain tests** (sister repo, `~/Desktop/Coding/GombiStar/tests/`): `pytest -q` from there. ~268 tests; covers flows + helpers + chart-pattern detection + intent regexes.
 - **Live smoke** (`scripts/smoke.py`): real uvicorn + real WS, walks echo_bot end-to-end. Use to verify framework changes haven't broken the wire shape.
-- **End-to-end visual** (Playwright MCP): drive the Expo web build through onboarding, verify section pagination + chip rendering, screenshot for visual review. Plan ~75-90s for runs that hit the real LLM (the first map read is a ~60s reasoning-tier call).
+- **End-to-end visual** (Playwright MCP): drive the Expo web build through onboarding, verify section pagination + chip rendering, screenshot for visual review. Plan ~75-90s for runs that hit the real LLM (the first map read is a ~60s reasoning-tier call). Save screenshots under `botella/screenshots/`.
+- **User-POV rubric** (`~/Desktop/Coding/GombiStar/mcp/user_pov_test_plan.md`): the felt-quality contract. 10 scenarios scored across Attention / Helpfulness / Voice / Continuity. Pytest catches code bugs; this catches LLM-behavior gaps that code can't see.
+
+### Ship gate for prompt / directive changes
+
+Any change to `personality/layla_system_prompt.md`, the per-call directives in `services/laila_chat.py` / `services/claude_service.py`, or the dispatch order in `botella_manifest.py:free_chat` must be verified against the user-POV rubric before shipping:
+
+- Re-run any rubric scenario the change *intends* to fix — must move from FAIL to PASS.
+- Spot-check at least 1–2 unrelated PASSING scenarios to confirm no regression. Tuning the prompt for one mode often shifts behavior in another.
+- A scenario that drops from 5/5 on any axis to ≤3/5 is a ship-blocker; investigate before pushing.
+- LLM output is non-deterministic — rerun any borderline scenario at least twice before treating one run as a verdict.
+
+Append the verdict (which scenarios passed/failed/regressed) to the commit message so the rubric history travels with the code. Save the relevant screenshots under `botella/screenshots/userpov-{NN}-{slug}.png` so the moment is reviewable later.
 
 ## When you ship code
 
