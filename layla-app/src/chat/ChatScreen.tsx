@@ -143,23 +143,17 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   }, []);
 
   const handleContentSizeChange = useCallback(() => {
-    // Sticky-bottom auto-follow ONLY for streaming tokens / user-msg
-    // echoes WHILE the user is already at-bottom. Completed bot bubbles
-    // never auto-scroll — viewport stays where the user is looking.
+    // Auto-follow new content with scrollToEnd — so the user sees what
+    // just arrived without manually scrolling. The ONE exception is
+    // when the user has actively scrolled away (userOverrideRef true)
+    // to re-read older content; we don't yank them.
     //
-    // We deliberately do NOT surface the "Latest" pill here. The pill
-    // is purely a USER-ACTION affordance: it appears when the user has
-    // actively scrolled away from the bottom (handleScroll fires).
-    // Programmatic content growth never triggers it — the user is
-    // staying where they were, content just lands below for them to
-    // scroll into when they're ready.
+    // The "Latest" pill is purely a USER-ACTION affordance, surfaced
+    // only by handleScroll when the user is more than one viewport
+    // above the bottom. Programmatic content growth never triggers it.
     if (userOverrideRef.current) return;
-    if (!isAtBottomRef.current) return;
-    const last = messagesRef.current[messagesRef.current.length - 1];
-    if (!last) return;
-    if (last.streaming || last.role === "user") {
-      listRef.current?.scrollToEnd({ animated: true });
-    }
+    if (messagesRef.current.length === 0) return;
+    listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
   // No per-row scroll behavior. Auto-scroll runs purely off
