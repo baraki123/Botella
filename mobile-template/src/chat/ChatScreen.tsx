@@ -22,6 +22,7 @@ import { Composer } from "./Composer";
 import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator } from "./TypingIndicator";
 import type { Message } from "./types";
+import { useChatScroll } from "./useChatScroll";
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -37,10 +38,15 @@ export function ChatScreen() {
   const [showTyping, setShowTyping] = useState(false);
   const streamRef = useRef<StreamClient | null>(null);
   const streamingIdRef = useRef<string | null>(null);
-  const listRef = useRef<FlatList<Message>>(null);
   const voice = useVoiceRecorder();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+
+  // Scroll behavior — see useChatScroll banner. Single source of truth
+  // for chat scroll across botella products. Don't add ad-hoc
+  // scrollToEnd / scrollToIndex calls in this file.
+  const scroll = useChatScroll<Message>(messages);
+  const { listRef, jumpToLatest } = scroll;
 
   // 1. Bootstrap session.
   useEffect(() => {
@@ -64,10 +70,8 @@ export function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  // 3. Auto-scroll on every message change.
-  useEffect(() => {
-    listRef.current?.scrollToEnd({ animated: true });
-  }, [messages, showTyping]);
+  // Auto-scroll is owned by useChatScroll's onContentSizeChange — no
+  // useEffect needed.
 
   function handleEvent(event: BotEvent) {
     switch (event.type) {
@@ -176,6 +180,9 @@ export function ChatScreen() {
 
   function send(text: string, opts?: { voice?: boolean }) {
     if (!streamRef.current) return;
+    // Sending implies "follow new content" — clear any earlier scroll
+    // override + re-prime the auto-follow.
+    jumpToLatest();
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
     streamRef.current.send({ text, voice_origin: opts?.voice });
   }
@@ -278,6 +285,11 @@ export function ChatScreen() {
           </View>
         )}
         ListFooterComponent={showTyping ? <TypingIndicator /> : null}
+        onLayout={scroll.onLayout}
+        onScroll={scroll.onScroll}
+        onScrollBeginDrag={scroll.onScrollBeginDrag}
+        onContentSizeChange={scroll.onContentSizeChange}
+        scrollEventThrottle={32}
       />
 
       <Composer

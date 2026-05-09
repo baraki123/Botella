@@ -1,14 +1,11 @@
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   FlatList,
   KeyboardAvoidingView,
-  type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -38,6 +35,7 @@ import { TypingIndicator } from "./TypingIndicator";
 import { Glow } from "./atmosphere/Glow";
 import { Starfield } from "./atmosphere/Starfield";
 import type { Message } from "./types";
+import { useChatScroll } from "./useChatScroll";
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -58,7 +56,6 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const [showTyping, setShowTyping] = useState(false);
   const streamRef = useRef<StreamClient | null>(null);
   const streamingIdRef = useRef<string | null>(null);
-  const listRef = useRef<FlatList<Message>>(null);
   const startedRef = useRef(false);
   const voice = useVoiceRecorder();
   const [recording, setRecording] = useState(false);
@@ -68,112 +65,18 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   const [adminBuild, setAdminBuild] = useState<MeBuild | null>(null);
   const insets = useSafeAreaInsets();
 
-  // ─── Scroll behavior — sticky-bottom + jump-to-latest pill ───────────
-  //
-  // ChatGPT/Claude.ai/iMessage convention: while the user is near the
-  // bottom of the list, every new message + every streaming token nudges
-  // the view down to keep the latest content visible. As soon as the
-  // user scrolls up to re-read something, auto-scroll stops — no
-  // yanking. A "↓ Latest" pill fades in over the bottom-right corner
-  // and tapping it (or sending a new message) snaps back to the bottom.
-  //
-  // Implementation: track at-bottom in a ref so the FlatList callbacks
-  // can read fresh state without re-rendering, and drive the pill's
-  // opacity off a separate Animated value so the fade doesn't depend on
-  // React state churn during fast streams.
-  const isAtBottomRef = useRef(true);
-  const userOverrideRef = useRef(false); // user manually scrolled away
-  // Mirror of the FlatList's scroll offset so handleContentSizeChange can
-  // recompute distance-from-bottom when new content arrives without
-  // waiting for a fresh user scroll event. Without this, the "Latest"
-  // pill stays hidden if a long bubble lands BELOW the viewport while
-  // the user is reading further up.
-  const scrollOffsetYRef = useRef(0);
-  const pillOpacity = useRef(new Animated.Value(0)).current;
-
-  const listHeightRef = useRef(0);
-  // Mirror of `messages` state for FlatList callbacks that need fresh
-  // state without re-rendering. Updated via useLayoutEffect so the
-  // mirror is in sync before paint.
-  const messagesRef = useRef<Message[]>([]);
-  useLayoutEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  const showPill = useCallback(
-    (visible: boolean) => {
-      Animated.timing(pillOpacity, {
-        toValue: visible ? 1 : 0,
-        duration: 180,
-        useNativeDriver: true,
-      }).start();
-    },
-    [pillOpacity],
-  );
-
-  const handleScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
-      scrollOffsetYRef.current = contentOffset.y;
-      const distanceFromBottom = Math.max(
-        0,
-        contentSize.height - layoutMeasurement.height - contentOffset.y,
-      );
-      const atBottom = distanceFromBottom < 60;
-      isAtBottomRef.current = atBottom;
-      if (atBottom) {
-        userOverrideRef.current = false;
-      }
-      // "↓ Latest" pill is only useful when the user has scrolled FAR
-      // away — paginating sections is a normal forward read motion,
-      // and the pill in that case is just noise. Show it only when
-      // they're more than one full viewport above the bottom (i.e.
-      // they've actively scrolled up to re-read something earlier).
-      const farFromBottom = distanceFromBottom > layoutMeasurement.height;
-      showPill(farFromBottom && messages.length > 0);
-    },
-    [messages.length, showPill],
-  );
-
-  const handleScrollBeginDrag = useCallback(() => {
-    // Any user-initiated drag means they're taking control. If they end
-    // up not-at-bottom, treat it as an override; we won't auto-follow
-    // streaming tokens until they're back near the bottom.
-    userOverrideRef.current = true;
-  }, []);
-
-  const handleContentSizeChange = useCallback(() => {
-    // Auto-follow new content with scrollToEnd — so the user sees what
-    // just arrived without manually scrolling. The ONE exception is
-    // when the user has actively scrolled away (userOverrideRef true)
-    // to re-read older content; we don't yank them.
-    //
-    // The "Latest" pill is purely a USER-ACTION affordance, surfaced
-    // only by handleScroll when the user is more than one viewport
-    // above the bottom. Programmatic content growth never triggers it.
-    if (userOverrideRef.current) return;
-    if (messagesRef.current.length === 0) return;
-    listRef.current?.scrollToEnd({ animated: true });
-  }, []);
-
-  // No per-row scroll behavior. Auto-scroll runs purely off
-  // handleContentSizeChange (sticky-bottom while at-bottom) so the
-  // viewport stays where the user is looking when new bubbles land.
-
-  const handleListLayout = useCallback((e: LayoutChangeEvent) => {
-    listHeightRef.current = e.nativeEvent.layout.height;
-  }, []);
+  // ─── Scroll behavior — locked in useChatScroll ───────────────────────
+  // The hook encapsulates the canonical contract (see its top-of-file
+  // banner). Wire its handlers/refs to the FlatList + Pressable below.
+  // Do NOT add ad-hoc scroll calls in this file — extend the hook in
+  // mobile-template/ and copy.
+  const scroll = useChatScroll<Message>(messages);
+  const { listRef, pillOpacity, jumpToLatest } = scroll;
 
   // The chips that are CURRENTLY actionable, rendered in a sticky row
-  // above the Composer.
-  //
-  // Rule: chips only show when the most recent message in the chat is
-  // a bot message with chips attached. Once the user replies (their
-  // message becomes latest) or another bot text lands without chips,
-  // the chips are conceptually superseded and we hide them. Searching
-  // backward for the last message-with-chips was wrong — it kept stale
-  // chips visible after /reset, after the user typed something new,
-  // and across other "the chips don't apply anymore" transitions.
+  // above the Composer. Show only when the latest message is a bot
+  // message carrying chips; once the user replies or another bot
+  // message lands without chips, hide them.
   const latestChipMessage = useMemo(() => {
     if (messages.length === 0) return null;
     const last = messages[messages.length - 1];
@@ -182,12 +85,6 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     }
     return null;
   }, [messages]);
-
-  const jumpToLatest = useCallback(() => {
-    userOverrideRef.current = false;
-    showPill(false);
-    listRef.current?.scrollToEnd({ animated: true });
-  }, [showPill]);
 
   // 1. Bootstrap session.
   useEffect(() => {
@@ -232,9 +129,8 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     streamRef.current?.send({ text: "/start" });
   }, [status]);
 
-  // (Auto-scroll is driven by FlatList.onContentSizeChange — see
-  // handleContentSizeChange above. Sticky-bottom: only follows new
-  // content when the user hasn't manually scrolled away.)
+  // Scroll behavior is owned by useChatScroll — see its top-of-file
+  // banner for the canonical contract.
 
   function handleEvent(event: BotEvent) {
     switch (event.type) {
@@ -348,10 +244,10 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     // Always render the user's message immediately. The StreamClient queues
     // the wire-send if the WS isn't open and flushes on reconnect, so the
     // user never has to wonder whether their message went through.
-    // Sending also implies "I want to be at the latest" — clear any
-    // earlier scroll override so the new exchange auto-follows.
-    userOverrideRef.current = false;
-    showPill(false);
+    // Sending also implies "I want to be at the latest" — `jumpToLatest`
+    // clears any earlier scroll override so onContentSizeChange resumes
+    // sticky-bottom-following.
+    jumpToLatest();
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
     streamRef.current?.send({ text, voice_origin: opts?.voice });
   }
@@ -424,11 +320,6 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     // "♃ My Jupiter" the value is the natural-language sentence, so we
     // display that instead — caller controls which it wants by setting
     // value === label or value !== label.
-    // Don't preemptively reset scroll state here. handleContentSizeChange
-    // will compute the right pill state once the user-msg + the bot's
-    // response land. Forcing showPill(false) before the new content
-    // arrives meant a long incoming bubble landed off-screen with no
-    // visible "↓ Latest" affordance.
     setMessages((m) => [...m, { id: uid(), role: "user", text: displayLabel }]);
     streamRef.current?.send({ text: sendValue });
   }
@@ -490,10 +381,10 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             // gesture (the iMessage / ChatGPT feel); on Android this
             // falls back to no-op so we add it as a non-iOS hint too.
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-            onLayout={handleListLayout}
-            onScroll={handleScroll}
-            onScrollBeginDrag={handleScrollBeginDrag}
-            onContentSizeChange={handleContentSizeChange}
+            onLayout={scroll.onLayout}
+            onScroll={scroll.onScroll}
+            onScrollBeginDrag={scroll.onScrollBeginDrag}
+            onContentSizeChange={scroll.onContentSizeChange}
             // scrollToIndex on a tall message can fail if the index is
             // outside the rendered window; this fallback rescues it.
             onScrollToIndexFailed={(info) => {
