@@ -747,33 +747,37 @@ curl -s -H "Authorization: Bearer $NF" \
   "https://api.northflank.com/v1/projects/gombibot/services/laylabot/logs?lines=200&type=runtime"
 ```
 
-### Build-info stamping (do this after every GombiStar push)
+### Build-info stamping (now automated — was manual)
+
+Stamping is automated by `.github/workflows/stamp-build.yml` in the
+GombiStar repo. On every push to `main`, GitHub Actions runs
+`scripts/stamp_build.py` which polls Northflank until the build for
+the pushed commit is deployed, then GETs / merges / POSTs the
+runtime-environment with the fresh `LAYLA_BUILD_VERSION`,
+`LAYLA_BUILD_NOTE`, and `LAYLA_BUILD_TIME`. No human touches it.
+
+One-time setup (per repo, ever): the workflow needs the Northflank
+API token in GitHub Secrets as `NORTHFLANK_TOKEN`:
+
+```bash
+# Inside the GombiStar repo:
+gh secret set NORTHFLANK_TOKEN --repo baraki123/GombiStar \
+  --body "$(grep '^NORTHFLANK_TOKEN' .env | cut -d= -f2)"
+```
+
+(Requires `gh auth login` once if `gh` isn't already authenticated.)
+
+#### Manual fallback (only if the workflow is broken)
 
 ```bash
 cd ~/Desktop/Coding/GombiStar
-SHA=$(git rev-parse --short=8 HEAD)
-NOTE=$(git log -1 --pretty=%s)
-TIME=$(git log -1 --pretty=%cI)
-NF=$(grep NORTHFLANK_TOKEN .env | cut -d= -f2)
-curl -s -H "Authorization: Bearer $NF" \
-  https://api.northflank.com/v1/projects/gombibot/services/laylabot/runtime-environment \
-  > /tmp/env.json
-SHA="$SHA" NOTE="$NOTE" TIME="$TIME" python3 -c "
-import json, os
-with open('/tmp/env.json') as f: d=json.load(f)
-env=d['data']['runtimeEnvironment']
-env['LAYLA_BUILD_VERSION']=os.environ['SHA']
-env['LAYLA_BUILD_NOTE']=os.environ['NOTE']
-env['LAYLA_BUILD_TIME']=os.environ['TIME']
-json.dump({'runtimeEnvironment': env}, open('/tmp/env_new.json','w'))"
-curl -s -X POST -H "Authorization: Bearer $NF" -H 'Content-Type: application/json' \
-  -d @/tmp/env_new.json \
-  https://api.northflank.com/v1/projects/gombibot/services/laylabot/runtime-environment
+NORTHFLANK_TOKEN=$(grep '^NORTHFLANK_TOKEN' .env | cut -d= -f2) \
+  GIT_SHA=$(git rev-parse --short=8 HEAD) \
+  GIT_NOTE="$(git log -1 --pretty=%s)" \
+  GIT_TIME="$(git log -1 --pretty=%cI)" \
+  WAIT_FOR_BUILD=0 \
+  python3 scripts/stamp_build.py
 ```
-
-This must run AFTER the build SUCCEEDs (otherwise the running container
-restarts on stale code). Wait for `BUILD: SUCCESS | DEPLOYMENT: COMPLETED`
-before stamping.
 
 ### Local dev
 

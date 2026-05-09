@@ -132,7 +132,7 @@ Append the verdict (which scenarios passed/failed/regressed) to the commit messa
 
 ## When you ship code
 
-Backend changes auto-deploy via Northflank on push to GombiStar's `main`. The deployed container's `.git` is stripped, so build provenance comes from env vars stamped via the Northflank API after push completes — see `context.md` §6 for the exact runbook (`SHA = git rev-parse --short=8 HEAD`, GET runtime-env, merge `LAYLA_BUILD_VERSION/_NOTE/_TIME`, POST it back). The iOS Settings → Admin · Build banner reads these.
+Backend changes auto-deploy via Northflank on push to GombiStar's `main`. Build provenance is stamped automatically by `.github/workflows/stamp-build.yml` (in the GombiStar repo) — that workflow polls until the new image is deployed, then merges `LAYLA_BUILD_VERSION/_NOTE/_TIME` into Northflank's runtime-environment via the API. No manual ritual. See `context.md` §6 for the (one-time) `gh secret set NORTHFLANK_TOKEN` setup that bootstraps the workflow.
 
 iOS app: changes here ship via Expo Go (reload) for dev, EAS Update (JS-only OTA) or a fresh TestFlight build for users.
 
@@ -152,7 +152,7 @@ iOS app: changes here ship via Expo Go (reload) for dev, EAS Update (JS-only OTA
 ## Working preferences (carried from project memory)
 
 - **End every reply with a `## Summary` block** — what you did / decisions needed / what the user needs to do.
-- **Deploy, don't delegate.** When a task completes, commit + push yourself; don't end with a "git pull / restart" todo for the user. Backend pushes auto-deploy via Northflank; stamp build env after build success.
+- **Deploy, don't delegate.** When a task completes, commit + push yourself; don't end with a "git pull / restart" todo for the user. Backend pushes auto-deploy via Northflank, and the stamp-build GH Actions workflow updates the build banner after deploy — no human ritual.
 - **Native iOS APIs** (Photos, Sharing, Notifications, mic, Apple Sign-In native paths) can't be verified from the dev box. Surface that explicitly when shipping; don't claim "done" without a device tap.
 - **Cross-project paste alert.** This terminal is for Layla / botella. If a message is clearly about another project (event-e-fire, passion website, etc.), pause and flag — they probably picked the wrong terminal tab.
 - **"Run the MCP" / drive end-to-end** means the iOS/web path (FastAPI + WS), not Telegram, unless the user explicitly says Telegram.
