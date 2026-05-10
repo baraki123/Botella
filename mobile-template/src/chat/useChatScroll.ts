@@ -52,6 +52,12 @@
  * ║      home-indicator inset re-applies on top of the raised        ║
  * ║      input, creating ~34px of dead space above the keyboard.     ║
  * ║                                                                  ║
+ * ║   8. The keyboard auto-dismisses after IDLE_KEYBOARD_DISMISS_MS  ║
+ * ║      of input inactivity (no focus, no typing). The Composer     ║
+ * ║      arms a timer on focus + on every keystroke; it fires        ║
+ * ║      Keyboard.dismiss() when the user has gone quiet. Constant   ║
+ * ║      exported here so it stays in one place across forks.        ║
+ * ║                                                                  ║
  * ║   ── Discipline ───────────────────────────────────────────      ║
  * ║                                                                  ║
  * ║   This file is canonical. ChatScreen / Bubble / Composer must    ║
@@ -137,6 +143,17 @@ const AT_BOTTOM_PX = 60;
  * bug, not a knob — surface it here.
  */
 export const KEYBOARD_VERTICAL_OFFSET_IOS = 24;
+
+/**
+ * Time the soft keyboard stays open without user input before
+ * Composer auto-dismisses it. 3 seconds: long enough that a user
+ * pausing to think doesn't lose their keyboard, short enough that
+ * a tap-on-input-but-walked-away state self-cleans.
+ *
+ * Single source of truth for every product fork — Composer reads
+ * from here, not a local constant.
+ */
+export const IDLE_KEYBOARD_DISMISS_MS = 3000;
 
 export function useChatScroll<T extends MinimalMessage>(
   messages: T[],

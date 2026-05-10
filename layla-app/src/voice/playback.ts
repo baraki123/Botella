@@ -159,27 +159,40 @@ async function _fetchAudioBlobUrl(
     throw new Error(`TTS synth failed (${res.status}): ${detail.slice(0, 200)}`);
   }
   const blob = await res.blob();
-  // On web, URL.createObjectURL gives us a local URL the audio
-  // element can stream from. On native, expo-audio accepts data: or
-  // file: URIs — we use a base64 data URI as the simplest path.
+
   let url: string;
   if (Platform.OS === "web" && typeof URL !== "undefined" && URL.createObjectURL) {
+    // Web: object URL → <audio>'s src works directly.
     url = URL.createObjectURL(blob);
   } else {
-    // Convert blob → base64 data URI for native playback.
+    // Native (iOS/Android): AVPlayer / ExoPlayer reject `data:` URIs in
+    // practice — passing one to createAudioPlayer makes it stall in a
+    // never-loaded state (the bug surface: Listen button stuck on
+    // "Loading…" forever). Write the bytes to a real file in the cache
+    // directory and play from `file://` instead.
+    //
+    // Using `/legacy` because expo-file-system 19+ shipped the new
+    // typed API as stubs that throw — see CLAUDE.md gotchas.
+    const FS = require("expo-file-system/legacy");
     const buf = await blob.arrayBuffer();
     const bytes = new Uint8Array(buf);
     let binary = "";
     for (let i = 0; i < bytes.byteLength; i++) {
       binary += String.fromCharCode(bytes[i]);
     }
-    // btoa exists on RN's Hermes runtime via the polyfill we already
-    // import at the top of index.ts (see CLAUDE.md notes).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const base64 = (globalThis as any).btoa
       ? (globalThis as any).btoa(binary)
       : Buffer.from(binary, "binary").toString("base64");
-    url = `data:audio/mpeg;base64,${base64}`;
+    // Hash-stable filename so repeated requests for the same text +
+    // voice reuse the same file. Cap the name so iOS path-length
+    // limits don't bite.
+    const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+    const fileUri = `${FS.cacheDirectory}tts-${safeKey}.mp3`;
+    await FS.writeAsStringAsync(fileUri, base64, {
+      encoding: FS.EncodingType.Base64,
+    });
+    url = fileUri;
   }
   _audioCache.set(key, url);
   if (_audioCache.size > _CACHE_MAX) {

@@ -35,7 +35,10 @@ interface Props {
 
 // Auto-dismiss the keyboard after this many ms of typing inactivity
 // (no onChangeText fires for the duration). Re-armed on every keystroke.
-const IDLE_DISMISS_MS = 3000;
+// Source of truth lives in useChatScroll.ts (canonical scroll +
+// keyboard contract). Importing the constant here so we don't have
+// two different "3 seconds" living in two files.
+import { IDLE_KEYBOARD_DISMISS_MS } from "./useChatScroll";
 
 
 export function Composer({
@@ -64,7 +67,7 @@ export function Composer({
     idleTimerRef.current = setTimeout(() => {
       Keyboard.dismiss();
       idleTimerRef.current = null;
-    }, IDLE_DISMISS_MS);
+    }, IDLE_KEYBOARD_DISMISS_MS);
   };
 
   const handleChangeText = (next: string) => {
@@ -129,6 +132,16 @@ export function Composer({
             editable={!recording && !transcribing}
             blurOnSubmit={false}
             multiline
+            // Suppress iOS QuickType (the "I | The | I'm" suggestion bar
+            // above the keyboard) + the spell-check underline. They're
+            // off-brand for Layla (system-suggestion noise, not a warm
+            // advisor's voice), AND on iOS the QuickType bar steals
+            // ~50px of vertical space that sometimes clips the bottom of
+            // the input. Turning them off both cleans up the look and
+            // gives the input full clearance over the keyboard.
+            autoCorrect={false}
+            spellCheck={false}
+            autoComplete="off"
             // Web: Enter sends, Shift+Enter newlines.
             onKeyPress={
               Platform.OS === "web"
