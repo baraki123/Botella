@@ -165,23 +165,28 @@ async function _fetchAudioBlobUrl(
     const detail = await res.text().catch(() => "");
     throw new Error(`TTS synth failed (${res.status}): ${detail.slice(0, 200)}`);
   }
-  const blob = await res.blob();
 
   let url: string;
   if (Platform.OS === "web" && typeof URL !== "undefined" && URL.createObjectURL) {
-    // Web: object URL → <audio>'s src works directly.
+    // Web: object URL → <audio>'s src works directly. Blob is fine here.
+    const blob = await res.blob();
     url = URL.createObjectURL(blob);
   } else {
     // Native (iOS/Android): AVPlayer / ExoPlayer reject `data:` URIs in
-    // practice — passing one to createAudioPlayer makes it stall in a
+    // practice — passing one to createAudioPlayer stalls in a
     // never-loaded state (the bug surface: Listen button stuck on
     // "Loading…" forever). Write the bytes to a real file in the cache
     // directory and play from `file://` instead.
     //
-    // Using `/legacy` because expo-file-system 19+ shipped the new
-    // typed API as stubs that throw — see CLAUDE.md gotchas.
+    // NOTE: do NOT route through Blob.arrayBuffer() — React Native's
+    // Blob implementation does not expose arrayBuffer() (the `blob.
+    // arrayBuffer is not a function` error surfaced on iOS). Read the
+    // Response directly via `res.arrayBuffer()`, which RN does support.
+    //
+    // Using `expo-file-system/legacy` because expo-file-system 19+
+    // shipped the new typed API as throwing stubs (see CLAUDE.md).
     const FS = require("expo-file-system/legacy");
-    const buf = await blob.arrayBuffer();
+    const buf = await res.arrayBuffer();
     const bytes = new Uint8Array(buf);
     let binary = "";
     for (let i = 0; i < bytes.byteLength; i++) {
