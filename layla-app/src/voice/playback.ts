@@ -34,24 +34,17 @@ import {
 } from "expo-audio";
 import { Platform } from "react-native";
 
+import { getCurrentJwt } from "../auth/anonymous";
 import { product } from "../config/product";
+import { bytesToBase64 } from "../lib/base64";
+
+// Re-export so the previous import path keeps working (Bubble.tsx etc.
+// imports getCurrentJwt from voice/playback). Source of truth lives in
+// auth/anonymous.ts next to the other JWT helpers.
+export { getCurrentJwt };
 
 const VOICE_TOGGLE_KEY = "layla:voice_playback_enabled";
 const VOICE_DEFAULT = false;
-// Mirror auth/anonymous.ts so playback can fetch its own JWT without a
-// prop-drill from ChatScreen down through Bubble.
-const JWT_KEY = "botella.jwt";
-
-
-/** Read the active JWT from storage. Returns null if not authenticated
- * (in which case Layla wouldn't have rendered anything to play). */
-export async function getCurrentJwt(): Promise<string | null> {
-  try {
-    return await AsyncStorage.getItem(JWT_KEY);
-  } catch {
-    return null;
-  }
-}
 
 // LRU map of (cache_key) → blob URL (web) or local file URI (native).
 // Bound at 64 entries so a long session doesn't leak memory.
@@ -173,32 +166,18 @@ async function _fetchAudioBlobUrl(
     url = URL.createObjectURL(blob);
   } else {
     // Native (iOS/Android): AVPlayer / ExoPlayer reject `data:` URIs in
-    // practice — passing one to createAudioPlayer stalls in a
-    // never-loaded state (the bug surface: Listen button stuck on
-    // "Loading…" forever). Write the bytes to a real file in the cache
-    // directory and play from `file://` instead.
+    // practice — passing one to createAudioPlayer stalls in a never-
+    // loaded state (the bug: Listen button stuck on "Loading…"). Write
+    // the bytes to a real file and play from `file://` instead.
     //
-    // NOTE: do NOT route through Blob.arrayBuffer() — React Native's
-    // Blob implementation does not expose arrayBuffer() (the `blob.
-    // arrayBuffer is not a function` error surfaced on iOS). Read the
-    // Response directly via `res.arrayBuffer()`, which RN does support.
-    //
-    // Using `expo-file-system/legacy` because expo-file-system 19+
-    // shipped the new typed API as throwing stubs (see CLAUDE.md).
+    // RN's Blob doesn't implement `.arrayBuffer()`; read the Response
+    // directly via `res.arrayBuffer()`. Then base64 → temp file via
+    // expo-file-system/legacy (the typed API on 19+ ships as throwing
+    // stubs — see CLAUDE.md).
     const FS = require("expo-file-system/legacy");
     const buf = await res.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const base64 = (globalThis as any).btoa
-      ? (globalThis as any).btoa(binary)
-      : Buffer.from(binary, "binary").toString("base64");
-    // Hash-stable filename so repeated requests for the same text +
-    // voice reuse the same file. Cap the name so iOS path-length
-    // limits don't bite.
+    const base64 = bytesToBase64(buf);
+    // Hash-stable filename so repeated requests reuse the same file.
     const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
     const fileUri = `${FS.cacheDirectory}tts-${safeKey}.mp3`;
     await FS.writeAsStringAsync(fileUri, base64, {

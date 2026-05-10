@@ -175,6 +175,14 @@ export function Bubble({ message, onImagePress }: Props) {
 // "this one is playing right now". Tap-to-stop on the active bubble;
 // tap on a different bubble stops the active one and starts this one.
 
+function playButtonLabel(playing: boolean, busy: boolean, errLabel: string | null): string {
+  if (playing) return "Playing…";
+  if (busy) return "Loading…";
+  if (errLabel) return errLabel;
+  return "Listen";
+}
+
+
 function PlayButton({ text }: { text: string }) {
   const cacheKey = useMemo(() => bubbleCacheKey(text), [text]);
   const [playing, setPlaying] = useState(false);
@@ -228,15 +236,7 @@ function PlayButton({ text }: { text: string }) {
       ]}
     >
       <Text style={styles.playGlyph}>{playing ? "⏸" : "▶"}</Text>
-      <Text style={styles.playLabel}>
-        {playing
-          ? "Playing…"
-          : busy
-            ? "Loading…"
-            : errLabel
-              ? errLabel
-              : "Listen"}
-      </Text>
+      <Text style={styles.playLabel}>{playButtonLabel(playing, busy, errLabel)}</Text>
     </Pressable>
   );
 }

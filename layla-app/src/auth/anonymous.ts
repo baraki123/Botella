@@ -84,3 +84,17 @@ export async function clearSession(): Promise<void> {
     AsyncStorage.removeItem(DEVICE_KEY),
   ]);
 }
+
+
+/** Read the active JWT directly from storage. Used by callers that
+ * need the bearer token but don't already hold a `Session` (e.g.
+ * voice/playback fetching TTS audio, where prop-drilling the JWT
+ * from ChatScreen down through Bubble would be intrusive). Returns
+ * null if not authenticated. */
+export async function getCurrentJwt(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(JWT_KEY);
+  } catch {
+    return null;
+  }
+}
