@@ -441,7 +441,11 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
           onToggleRecord={toggleRecord}
           recording={recording}
           transcribing={transcribing}
-          bottomInset={insets.bottom}
+          // Drop the home-indicator safe-area while keyboard is up —
+          // the keyboard already covers that strip, so re-applying it
+          // creates dead space above the keyboard. See useChatScroll
+          // contract rule 7.
+          bottomInset={scroll.isKeyboardVisible ? 0 : insets.bottom}
         />
       </KeyboardAvoidingView>
 

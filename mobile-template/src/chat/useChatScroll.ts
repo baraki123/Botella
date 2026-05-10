@@ -46,6 +46,12 @@
  * ║      iOS (exported from this file — see below). The constant     ║
  * ║      lives here so screens never re-decide it. Web is a no-op.   ║
  * ║                                                                  ║
+ * ║   7. The Composer (and any bottom-anchored UI) MUST drop its     ║
+ * ║      safe-area bottom padding while the keyboard is showing,     ║
+ * ║      using `isKeyboardVisible` from this hook. Otherwise the     ║
+ * ║      home-indicator inset re-applies on top of the raised        ║
+ * ║      input, creating ~34px of dead space above the keyboard.     ║
+ * ║                                                                  ║
  * ║   ── Discipline ───────────────────────────────────────────      ║
  * ║                                                                  ║
  * ║   This file is canonical. ChatScreen / Bubble / Composer must    ║
@@ -57,7 +63,13 @@
  * ║                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   FlatList,
@@ -89,6 +101,12 @@ export interface ChatScrollControls<T extends MinimalMessage> {
   onLayout: (e: LayoutChangeEvent) => void;
   /** Wire to the pill's onPress — clears override + scrolls to bottom. */
   jumpToLatest: () => void;
+  /** True while the soft keyboard is showing (iOS + Android). Use this to
+   * drop the safe-area bottom padding in the Composer (or any other
+   * bottom-anchored UI) — the keyboard already covers the home-indicator
+   * area, so adding `insets.bottom` on top of it just creates dead space
+   * above the keyboard. Always-false on web. */
+  isKeyboardVisible: boolean;
 }
 
 const PILL_FADE_MS = 180;
@@ -105,10 +123,20 @@ const AT_BOTTOM_PX = 60;
  * uses the same value — there is no good reason for a chat screen to
  * pick its own number, and tuning this in two places drifts.
  *
+ * Tuned to ~24 because:
+ *  - When keyboard is UP, the home-indicator safe-area bottom is
+ *    irrelevant (keyboard covers it). Composers must drop their
+ *    safe-area bottom padding while keyboard is visible — see
+ *    `isKeyboardVisible` returned from useChatScroll. With that drop,
+ *    we don't need a large offset to compensate for accumulated
+ *    bottom dead-space.
+ *  - The hook re-snaps to bottom on keyboard show/hide, so any small
+ *    clipping is corrected by scrolling, not by padding.
+ *
  * If you find a screen that needs a different value, you have a layout
  * bug, not a knob — surface it here.
  */
-export const KEYBOARD_VERTICAL_OFFSET_IOS = 56;
+export const KEYBOARD_VERTICAL_OFFSET_IOS = 24;
 
 export function useChatScroll<T extends MinimalMessage>(
   messages: T[],
@@ -203,6 +231,12 @@ export function useChatScroll<T extends MinimalMessage>(
     }
   }, []);
 
+  // Keyboard visibility: tracked so consumers (Composer, etc.) can drop
+  // safe-area bottom padding while keyboard is showing — the keyboard
+  // already covers the home-indicator strip, so re-applying it just
+  // creates dead space.
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
   // Keyboard show/hide on iOS specifically: KeyboardAvoidingView shrinks
   // the FlatList AFTER the keyboard animation begins, but the new bottom
   // isn't always picked up by onLayout in time for the user to see the
@@ -214,6 +248,7 @@ export function useChatScroll<T extends MinimalMessage>(
     const showSub = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
       () => {
+        setIsKeyboardVisible(true);
         if (
           isAtBottomRef.current
           && !userOverrideRef.current
@@ -231,6 +266,7 @@ export function useChatScroll<T extends MinimalMessage>(
     const hideSub = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
       () => {
+        setIsKeyboardVisible(false);
         if (isAtBottomRef.current && !userOverrideRef.current) {
           setTimeout(() => {
             listRef.current?.scrollToEnd({ animated: true });
@@ -258,5 +294,6 @@ export function useChatScroll<T extends MinimalMessage>(
     onContentSizeChange,
     onLayout,
     jumpToLatest,
+    isKeyboardVisible,
   };
 }
