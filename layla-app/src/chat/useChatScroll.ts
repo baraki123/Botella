@@ -124,25 +124,26 @@ const AT_BOTTOM_PX = 60;
 
 /**
  * The vertical offset KeyboardAvoidingView must use on iOS so the
- * input + sticky chip row clear the QuickType suggestions bar with
- * breathing room. Exported here so every screen in every product fork
- * uses the same value — there is no good reason for a chat screen to
- * pick its own number, and tuning this in two places drifts.
+ * input clears the keyboard's top edge with breathing room.
  *
- * Tuned to ~24 because:
- *  - When keyboard is UP, the home-indicator safe-area bottom is
- *    irrelevant (keyboard covers it). Composers must drop their
- *    safe-area bottom padding while keyboard is visible — see
- *    `isKeyboardVisible` returned from useChatScroll. With that drop,
- *    we don't need a large offset to compensate for accumulated
- *    bottom dead-space.
- *  - The hook re-snaps to bottom on keyboard show/hide, so any small
- *    clipping is corrected by scrolling, not by padding.
+ * Why 44 (not 24):
+ *  - Composer drops its safe-area bottom while keyboard is visible
+ *    (rule 7 — home indicator is covered), so paddingBottom
+ *    inside the bar collapses to 14px.
+ *  - 14 + 24 = 38, which on real iPhone hardware leaves the input
+ *    bottom edge ~half-clipped by the keyboard's top.
+ *  - 14 + 44 ≈ 58, enough to fully clear the keyboard's top stroke
+ *    plus a hair of breathing room.
+ *
+ * Why not larger (the previous 56 caused "tons of empty space"):
+ *  - 14 + 56 + insets.bottom (34, before we dropped that) = 104.
+ *    Now that we drop insets.bottom on keyboard show, 56 alone is
+ *    too generous. 44 is the sweet spot.
  *
  * If you find a screen that needs a different value, you have a layout
  * bug, not a knob — surface it here.
  */
-export const KEYBOARD_VERTICAL_OFFSET_IOS = 24;
+export const KEYBOARD_VERTICAL_OFFSET_IOS = 44;
 
 /**
  * Time the soft keyboard stays open without user input before
