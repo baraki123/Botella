@@ -1,10 +1,14 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
  * ║                                                                  ║
- * ║   CANONICAL CHAT SCROLL CONTRACT — botella mobile products       ║
+ * ║   CANONICAL CHAT SCROLL + KEYBOARD CONTRACT                      ║
+ * ║   botella mobile products                                        ║
  * ║                                                                  ║
- * ║   This hook owns ALL scroll behavior of the chat list. The       ║
- * ║   contract is:                                                   ║
+ * ║   This hook owns ALL scroll behavior of the chat list AND        ║
+ * ║   the keyboard-related layout response. They are inseparable:    ║
+ * ║   a soft-keyboard event IS a scroll trigger.                     ║
+ * ║                                                                  ║
+ * ║   ── Scroll rules ─────────────────────────────────────────      ║
  * ║                                                                  ║
  * ║   1. Viewport stays where the user is looking when new bubbles   ║
  * ║      arrive — UNLESS the user is currently AT-BOTTOM, in which   ║
@@ -22,11 +26,34 @@
  * ║      bottom (driven by handleScroll only — never by programmatic ║
  * ║      content growth). Tap pill → scrollToEnd, hide pill.         ║
  * ║                                                                  ║
- * ║   This matches the behavior shipped in the Laila / Layla         ║
- * ║   redesign 2026-05-08 to 2026-05-09 after several user-feedback  ║
- * ║   iterations. DO NOT modify the contract in product forks. If    ║
- * ║   you change anything here, sync the file to all forks of        ║
- * ║   botella/mobile-template (currently: layla-app).                ║
+ * ║   ── Keyboard rules ───────────────────────────────────────      ║
+ * ║                                                                  ║
+ * ║   4. When the visible FlatList area SHRINKS (keyboard rising,    ║
+ * ║      sticky chip row appearing, etc.) and the user was at-       ║
+ * ║      bottom, we re-snap to bottom inside onLayout. Without this  ║
+ * ║      the latest bubble can end up clipped behind the newly-      ║
+ * ║      raised input.                                               ║
+ * ║                                                                  ║
+ * ║   5. On Keyboard.didShow / didHide we re-snap to bottom (with    ║
+ * ║      a small post-layout delay) so any keyboard-driven height    ║
+ * ║      change that didn't surface via onLayout still corrects.     ║
+ * ║      Same gating: only when at-bottom, only when user hasn't     ║
+ * ║      taken over via drag.                                        ║
+ * ║                                                                  ║
+ * ║   6. The KeyboardAvoidingView wrapping the chat MUST use         ║
+ * ║      `behavior="padding"` on iOS, `"height"` on Android, and     ║
+ * ║      `keyboardVerticalOffset = KEYBOARD_VERTICAL_OFFSET_IOS` on  ║
+ * ║      iOS (exported from this file — see below). The constant     ║
+ * ║      lives here so screens never re-decide it. Web is a no-op.   ║
+ * ║                                                                  ║
+ * ║   ── Discipline ───────────────────────────────────────────      ║
+ * ║                                                                  ║
+ * ║   This file is canonical. ChatScreen / Bubble / Composer must    ║
+ * ║   NEVER add ad-hoc scrollToEnd / scrollToIndex / Keyboard event  ║
+ * ║   listeners. If you change anything here, sync the file verbatim ║
+ * ║   to every fork of botella/mobile-template (currently: layla-    ║
+ * ║   app). Behavior shipped in the Laila redesign 2026-05-08 →      ║
+ * ║   2026-05-10 after several rounds of user-feedback iteration.    ║
  * ║                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
@@ -70,6 +97,18 @@ const PILL_FADE_MS = 180;
 // to tolerate scroll inertia; large enough that one-pixel float math
 // doesn't flip-flop the state.
 const AT_BOTTOM_PX = 60;
+
+/**
+ * The vertical offset KeyboardAvoidingView must use on iOS so the
+ * input + sticky chip row clear the QuickType suggestions bar with
+ * breathing room. Exported here so every screen in every product fork
+ * uses the same value — there is no good reason for a chat screen to
+ * pick its own number, and tuning this in two places drifts.
+ *
+ * If you find a screen that needs a different value, you have a layout
+ * bug, not a knob — surface it here.
+ */
+export const KEYBOARD_VERTICAL_OFFSET_IOS = 56;
 
 export function useChatScroll<T extends MinimalMessage>(
   messages: T[],

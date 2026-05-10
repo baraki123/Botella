@@ -35,7 +35,7 @@ import { TypingIndicator } from "./TypingIndicator";
 import { Glow } from "./atmosphere/Glow";
 import { Starfield } from "./atmosphere/Starfield";
 import type { Message } from "./types";
-import { useChatScroll } from "./useChatScroll";
+import { KEYBOARD_VERTICAL_OFFSET_IOS, useChatScroll } from "./useChatScroll";
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -355,16 +355,14 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
 
       <KeyboardAvoidingView
         style={styles.kav}
+        // Behavior + offset are locked in by the canonical scroll
+        // contract — see useChatScroll.ts header (rule 6). Don't
+        // tune them here; tune the constant in the hook so every
+        // product fork stays in sync.
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        // Lift so the input + sticky chip row clear the iOS keyboard
-        // with breathing room. Previous value (20) was too tight: the
-        // last bot bubble sometimes ended up clipped behind the chips
-        // / composer stack right after the keyboard rose. The hook
-        // (useChatScroll) re-snaps to bottom on keyboard events to
-        // catch any remaining gap, but the offset itself needs to
-        // account for the QuickType suggestions bar AND give the
-        // sticky chip row a full row of clearance.
-        keyboardVerticalOffset={Platform.OS === "ios" ? 56 : 0}
+        keyboardVerticalOffset={
+          Platform.OS === "ios" ? KEYBOARD_VERTICAL_OFFSET_IOS : 0
+        }
       >
         <ChatHeader status={status} onOpenSettings={onOpenSettings} />
 
