@@ -1,3 +1,10 @@
+// Bundle-version probe — bump when we change the playback path so we can
+// confirm in logs / on-screen which build is running on the device.
+// (When debugging shows "playback v2" in Metro logs, the temp-file fix is
+// live; if it shows "playback v1" or undefined, the device is on a stale
+// bundle and needs a reload.)
+export const PLAYBACK_VERSION = "v2-tempfile";
+
 /**
  * Audio playback for Layla — fetches synthesized speech from
  * /v1/tts/synthesize and plays it through expo-audio.
@@ -216,6 +223,13 @@ export async function togglePlay(opts: {
   voice?: string;
   jwt: string;
 }): Promise<void> {
+  // Visible breadcrumb in Metro / device logs so we can confirm the
+  // bundle has reloaded after frontend ships. Temporary while
+  // debugging; remove once playback is stable on iOS native.
+  console.log(
+    `[tts] togglePlay ${PLAYBACK_VERSION} (Platform.OS=${Platform.OS})`,
+  );
+
   const voice = opts.voice ?? "shimmer";
   const key = bubbleCacheKey(opts.text, voice);
 
@@ -232,16 +246,44 @@ export async function togglePlay(opts: {
   // calls etc. (no-op on web). Best-effort.
   try {
     await setAudioModeAsync({ playsInSilentMode: true });
-  } catch {}
+  } catch (e) {
+    console.warn(`[tts] setAudioModeAsync failed:`, e);
+  }
 
-  const url = await _fetchAudioBlobUrl(opts.text, voice, opts.jwt);
-  const player = createAudioPlayer({ uri: url });
+  let url: string;
+  try {
+    url = await _fetchAudioBlobUrl(opts.text, voice, opts.jwt);
+    console.log(`[tts] got audio URL (${url.slice(0, 60)}...)`);
+  } catch (e) {
+    console.warn(`[tts] _fetchAudioBlobUrl FAILED:`, e);
+    _notify(null);
+    throw e;
+  }
+
+  let player: AudioPlayer;
+  try {
+    player = createAudioPlayer({ uri: url });
+  } catch (e) {
+    console.warn(`[tts] createAudioPlayer FAILED for url ${url.slice(0, 60)}:`, e);
+    _notify(null);
+    throw e;
+  }
+
   _currentPlayer = player;
   _notify(key);
 
   // Auto-clear when the track finishes. expo-audio fires `playbackStatusUpdate`
-  // events; we listen for `didJustFinish`.
-  const sub = player.addListener("playbackStatusUpdate", (status) => {
+  // events; we listen for `didJustFinish`. Also log error states so we
+  // can see in Metro why playback might fail to start.
+  const sub = player.addListener("playbackStatusUpdate", (status: any) => {
+    // Status shape varies; log the keys we care about so iOS-native
+    // playback failures are diagnosable.
+    if (status?.error || status?.didJustFinish || status?.isLoaded === false) {
+      console.log(
+        `[tts] status: loaded=${status?.isLoaded} playing=${status?.playing} `
+        + `finished=${status?.didJustFinish} error=${status?.error}`,
+      );
+    }
     if (status?.didJustFinish) {
       sub?.remove?.();
       if (_currentPlayer === player) {
@@ -250,7 +292,14 @@ export async function togglePlay(opts: {
       }
     }
   });
-  player.play();
+
+  try {
+    player.play();
+  } catch (e) {
+    console.warn(`[tts] player.play() FAILED:`, e);
+    _notify(null);
+    throw e;
+  }
 }
 
 

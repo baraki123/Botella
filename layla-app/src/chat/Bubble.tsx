@@ -179,6 +179,10 @@ function PlayButton({ text }: { text: string }) {
   const cacheKey = useMemo(() => bubbleCacheKey(text), [text]);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Last error surfaced on the button label so failures don't go
+  // silent — better to show "TTS error" than have the user wonder
+  // why nothing's happening. Cleared on the next successful tap.
+  const [errLabel, setErrLabel] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribePlaybackState((activeKey) => {
@@ -189,20 +193,24 @@ function PlayButton({ text }: { text: string }) {
 
   const onPress = async () => {
     if (busy) return;
+    setErrLabel(null);
     const enabled = await getVoicePlaybackEnabled();
     if (!enabled) {
-      // Settings off — silent no-op. The toggle is in Settings ▸ Voice.
-      // No toast: the affordance discovery is enough.
+      setErrLabel("Voice off (Settings)");
       return;
     }
     const jwt = await getCurrentJwt();
-    if (!jwt) return;
+    if (!jwt) {
+      setErrLabel("Not signed in");
+      return;
+    }
     setBusy(true);
     try {
       await togglePlay({ text, jwt });
-    } catch {
-      // Network / synth failure — silently degrade. No toast yet; if it
-      // becomes a frequent miss we add one.
+    } catch (e: any) {
+      const msg = String(e?.message || e || "error").slice(0, 40);
+      console.warn("[tts] togglePlay threw:", e);
+      setErrLabel(msg);
     } finally {
       setBusy(false);
     }
@@ -221,7 +229,13 @@ function PlayButton({ text }: { text: string }) {
     >
       <Text style={styles.playGlyph}>{playing ? "⏸" : "▶"}</Text>
       <Text style={styles.playLabel}>
-        {playing ? "Playing…" : busy ? "Loading…" : "Listen"}
+        {playing
+          ? "Playing…"
+          : busy
+            ? "Loading…"
+            : errLabel
+              ? errLabel
+              : "Listen"}
       </Text>
     </Pressable>
   );
