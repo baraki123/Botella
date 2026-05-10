@@ -30,13 +30,15 @@
  * ║                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import {
   Animated,
   FlatList,
+  Keyboard,
   LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
 } from "react-native";
 
 interface MinimalMessage {
@@ -137,7 +139,70 @@ export function useChatScroll<T extends MinimalMessage>(
   }, []);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
-    listHeightRef.current = e.nativeEvent.layout.height;
+    const newHeight = e.nativeEvent.layout.height;
+    const prevHeight = listHeightRef.current;
+    listHeightRef.current = newHeight;
+    // When the FlatList's visible height shrinks (keyboard rising,
+    // sticky-chip row appearing) and the user was at-bottom, keep them
+    // at-bottom. Without this, an in-flight bot bubble that was just
+    // rendered at the previous bottom edge ends up clipped behind the
+    // newly-raised input/keyboard. Only re-snap when the height
+    // actually shrunk and the user hasn't scrolled away.
+    if (
+      prevHeight > 0
+      && newHeight + 1 < prevHeight
+      && isAtBottomRef.current
+      && !userOverrideRef.current
+      && messagesRef.current.length > 0
+    ) {
+      // Use requestAnimationFrame so the layout pass completes before
+      // we issue the scroll — otherwise scrollToEnd uses the stale
+      // height for its target offset.
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: false });
+      });
+    }
+  }, []);
+
+  // Keyboard show/hide on iOS specifically: KeyboardAvoidingView shrinks
+  // the FlatList AFTER the keyboard animation begins, but the new bottom
+  // isn't always picked up by onLayout in time for the user to see the
+  // most recent bubble. Re-snap to bottom on didShow + didHide so the
+  // visible-area always frames the latest content while the user is
+  // at-bottom. iOS only — Android handles this via softInputMode.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => {
+        if (
+          isAtBottomRef.current
+          && !userOverrideRef.current
+          && messagesRef.current.length > 0
+        ) {
+          // Slight delay so the keyboard animation completes its first
+          // frame before we scroll — otherwise the scroll happens to
+          // the pre-resize content edge.
+          setTimeout(() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          }, 50);
+        }
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        if (isAtBottomRef.current && !userOverrideRef.current) {
+          setTimeout(() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          }, 50);
+        }
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
 
   const jumpToLatest = useCallback(() => {

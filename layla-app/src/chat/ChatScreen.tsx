@@ -355,10 +355,16 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
 
       <KeyboardAvoidingView
         style={styles.kav}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        // Small lift so the input clears the iOS QuickType suggestions bar
-        // with a hair of breathing room.
-        keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        // Lift so the input + sticky chip row clear the iOS keyboard
+        // with breathing room. Previous value (20) was too tight: the
+        // last bot bubble sometimes ended up clipped behind the chips
+        // / composer stack right after the keyboard rose. The hook
+        // (useChatScroll) re-snaps to bottom on keyboard events to
+        // catch any remaining gap, but the offset itself needs to
+        // account for the QuickType suggestions bar AND give the
+        // sticky chip row a full row of clearance.
+        keyboardVerticalOffset={Platform.OS === "ios" ? 56 : 0}
       >
         <ChatHeader status={status} onOpenSettings={onOpenSettings} />
 
