@@ -132,15 +132,15 @@ export function Composer({
             editable={!recording && !transcribing}
             blurOnSubmit={false}
             multiline
-            // Suppress iOS QuickType (the "I | The | I'm" suggestion bar
-            // above the keyboard) + the spell-check underline. They're
-            // off-brand for Layla (system-suggestion noise, not a warm
-            // advisor's voice), AND on iOS the QuickType bar steals
-            // ~50px of vertical space that sometimes clips the bottom of
-            // the input. Turning them off both cleans up the look and
-            // gives the input full clearance over the keyboard.
+            // Spell-check ON (red squiggle under misspellings) — users
+            // typing names of people / cities / events benefit from a
+            // catch on typos. Autocorrect stays OFF: iOS's QuickType
+            // suggestion bar above the keyboard steals ~50px of vertical
+            // space (which can clip the bottom of the input) and the
+            // "I | The | I'm" word-suggest noise is off-brand for the
+            // advisor voice. So: keep the underline, drop the bar.
             autoCorrect={false}
-            spellCheck={false}
+            spellCheck
             autoComplete="off"
             // Web: Enter sends, Shift+Enter newlines.
             onKeyPress={

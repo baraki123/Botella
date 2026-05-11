@@ -12,14 +12,33 @@
  * ║                                                                  ║
  * ║   1. Viewport stays where the user is looking when new bubbles   ║
  * ║      arrive — UNLESS the user is currently AT-BOTTOM, in which   ║
- * ║      case we sticky-follow new content.                          ║
+ * ║      case we follow the new content using the "smart-snap" rule  ║
+ * ║      in #2 below.                                                ║
  * ║                                                                  ║
- * ║   2. Sticky-bottom auto-follow fires for streaming tokens, user  ║
- * ║      message echoes, AND completed bot bubbles, but only while   ║
- * ║      the user is at-bottom (isAtBottomRef true). If the user has ║
- * ║      actively dragged the list away (userOverrideRef true), we   ║
- * ║      never auto-scroll — they're reading older content and a     ║
- * ║      yank would lose their place.                                ║
+ * ║   2. Smart-snap (new-bubble follow) — auto-follow new content    ║
+ * ║      so the user always sees the START of the new block, never   ║
+ * ║      mid-text. Two cases:                                        ║
+ * ║                                                                  ║
+ * ║         A. Latest message FITS in the visible area above the     ║
+ * ║            keyboard → scrollToEnd. Whole block sits above the    ║
+ * ║            keyboard; user reads it in one glance.                ║
+ * ║                                                                  ║
+ * ║         B. Latest message is TALLER than the visible area →     ║
+ * ║            scrollToOffset so the message's top edge is one       ║
+ * ║            line below the chrome (lastBubbleTop - ONE_LINE_PX).  ║
+ * ║            User sees the START of the block plus one line of    ║
+ * ║            prior context as a visual anchor that this is a new  ║
+ * ║            message block.                                        ║
+ * ║                                                                  ║
+ * ║      Smart-snap fires only while the user is at-bottom           ║
+ * ║      (isAtBottomRef true) and hasn't dragged away                ║
+ * ║      (userOverrideRef false). It fires for new-bubble arrival,   ║
+ * ║      streaming token growth on the latest bubble, viewport       ║
+ * ║      shrink (keyboard rise / chip-row appear), AND keyboard      ║
+ * ║      show/hide. Bulk message arrivals (session restore /        ║
+ * ║      history load) bypass smart-snap and use plain scrollToEnd  ║
+ * ║      — the user wants to be at the bottom of the loaded thread, ║
+ * ║      not at the top of the first message.                       ║
  * ║                                                                  ║
  * ║   3. The "↓ Latest" pill surfaces ONLY when the user has         ║
  * ║      actively scrolled MORE THAN ONE FULL VIEWPORT above the     ║
@@ -30,15 +49,19 @@
  * ║                                                                  ║
  * ║   4. When the visible FlatList area SHRINKS (keyboard rising,    ║
  * ║      sticky chip row appearing, etc.) and the user was at-       ║
- * ║      bottom, we re-snap to bottom inside onLayout. Without this  ║
+ * ║      bottom, we re-run smart-snap inside onLayout. Without this  ║
  * ║      the latest bubble can end up clipped behind the newly-      ║
- * ║      raised input.                                               ║
+ * ║      raised input. Critically, smart-snap re-evaluates Case A    ║
+ * ║      vs Case B with the NEW (smaller) viewport, so a message     ║
+ * ║      that fit before the keyboard rose but no longer fits now    ║
+ * ║      anchors to its top instead of jamming the user into the     ║
+ * ║      tail end behind the keyboard.                               ║
  * ║                                                                  ║
- * ║   5. On Keyboard.didShow / didHide we re-snap to bottom (with    ║
+ * ║   5. On Keyboard.didShow / didHide we re-run smart-snap (with    ║
  * ║      a small post-layout delay) so any keyboard-driven height    ║
  * ║      change that didn't surface via onLayout still corrects.     ║
  * ║      Same gating: only when at-bottom, only when user hasn't     ║
- * ║      taken over via drag.                                        ║
+ * ║      taken over via drag. Same Case A vs Case B logic.           ║
  * ║                                                                  ║
  * ║   6. The KeyboardAvoidingView wrapping the chat MUST use         ║
  * ║      `behavior="padding"` on iOS, `"height"` on Android, and     ║
@@ -102,7 +125,7 @@ export interface ChatScrollControls<T extends MinimalMessage> {
   /** Pass to <FlatList onScrollBeginDrag={onScrollBeginDrag} …/>. */
   onScrollBeginDrag: () => void;
   /** Pass to <FlatList onContentSizeChange={onContentSizeChange} …/>. */
-  onContentSizeChange: () => void;
+  onContentSizeChange: (contentWidth: number, contentHeight: number) => void;
   /** Pass to <FlatList onLayout={onLayout} …/>. */
   onLayout: (e: LayoutChangeEvent) => void;
   /** Wire to the pill's onPress — clears override + scrolls to bottom. */
@@ -121,6 +144,13 @@ const PILL_FADE_MS = 180;
 // to tolerate scroll inertia; large enough that one-pixel float math
 // doesn't flip-flop the state.
 const AT_BOTTOM_PX = 60;
+// Smart-snap Case B anchor offset: when the latest message is taller
+// than the viewport, scroll so its top sits ONE_LINE_PX below the top
+// of the viewport. The one line of prior context is a visual anchor
+// telling the user "this is the start of a new block." 24 ≈ body
+// line-height in bubbles (fontSize 16, lineHeight 22) + a hair of
+// padding, so we show roughly the bottom of the previous bubble.
+const ONE_LINE_PX = 24;
 
 /**
  * The vertical offset KeyboardAvoidingView must use on iOS so the
@@ -166,15 +196,72 @@ export function useChatScroll<T extends MinimalMessage>(
   // is in sync BEFORE paint — critical because onLayout / onContentSize
   // fire synchronously after setMessages re-render.
   const messagesRef = useRef<T[]>([]);
-  useLayoutEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
 
   const isAtBottomRef = useRef(true);
   const userOverrideRef = useRef(false);
   const scrollOffsetYRef = useRef(0);
   const listHeightRef = useRef(0);
   const pillOpacity = useRef(new Animated.Value(0)).current;
+
+  // Smart-snap state (see contract rule 2 above).
+  // - prevContentHeightRef: total content height as of the last
+  //   onContentSizeChange. Captured at useLayoutEffect time so that
+  //   when a new bubble lands, we know where its TOP is in content
+  //   coords (the previous bottom = new bubble's top).
+  // - lastBubbleTopRef: y-position of the most recent bubble's top
+  //   edge in content coords. Used by snapToLatest to compute Case A
+  //   vs Case B.
+  // - prevMessageCountRef: detects single-message arrival vs bulk
+  //   (session restore / history load).
+  // - isBulkArrivalRef: tells onContentSizeChange to bypass smart-snap
+  //   and use plain scrollToEnd. Cleared after one use.
+  const prevContentHeightRef = useRef(0);
+  const lastBubbleTopRef = useRef(0);
+  const prevMessageCountRef = useRef(0);
+  const isBulkArrivalRef = useRef(false);
+
+  useLayoutEffect(() => {
+    messagesRef.current = messages;
+    // Smart-snap bookkeeping: detect single new bubble vs bulk arrival.
+    // Runs BEFORE the FlatList's onContentSizeChange for this render
+    // pass, so we capture the OLD content height as the new bubble's
+    // top before it changes.
+    const prev = prevMessageCountRef.current;
+    const curr = messages.length;
+    if (curr === prev + 1) {
+      // Single new bubble: its top sits at the previous bottom.
+      lastBubbleTopRef.current = prevContentHeightRef.current;
+    } else if (curr !== prev) {
+      // Bulk change (session restore, history load, clear): user
+      // wants to be at the bottom of the whole loaded thread, not
+      // anchored to the start of the first message. Force scrollToEnd
+      // on the next onContentSizeChange and skip smart-snap.
+      isBulkArrivalRef.current = true;
+    }
+    prevMessageCountRef.current = curr;
+  }, [messages]);
+
+  // Run the smart-snap rule: Case A (fits) → scrollToEnd; Case B
+  // (overflows) → scroll so the new bubble's top is one line below
+  // the viewport top. Always gated by isAtBottomRef + userOverrideRef
+  // at the call sites; this helper just decides WHICH scroll to do.
+  const snapToLatest = useCallback((animated: boolean) => {
+    const list = listRef.current;
+    if (!list) return;
+    const viewportH = listHeightRef.current;
+    const contentH = prevContentHeightRef.current;
+    const lastTop = lastBubbleTopRef.current;
+    const lastBlockH = Math.max(0, contentH - lastTop);
+    // viewportH not measured yet OR latest block fits → sticky-bottom.
+    if (viewportH <= 0 || lastBlockH <= viewportH) {
+      list.scrollToEnd({ animated });
+      return;
+    }
+    // Case B: scroll so the new block's top is one line below the top
+    // of the viewport.
+    const offset = Math.max(0, lastTop - ONE_LINE_PX);
+    list.scrollToOffset({ offset, animated });
+  }, []);
 
   const setPill = useCallback(
     (visible: boolean) => {
@@ -213,41 +300,56 @@ export function useChatScroll<T extends MinimalMessage>(
     userOverrideRef.current = true;
   }, []);
 
-  const onContentSizeChange = useCallback(() => {
-    // Auto-follow new content with scrollToEnd — so the user sees
-    // what just arrived without manually scrolling. The exception:
-    // userOverrideRef true means they're actively reading older
-    // content; never yank them.
-    if (userOverrideRef.current) return;
-    if (messagesRef.current.length === 0) return;
-    listRef.current?.scrollToEnd({ animated: true });
-  }, []);
-
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    const newHeight = e.nativeEvent.layout.height;
-    const prevHeight = listHeightRef.current;
-    listHeightRef.current = newHeight;
-    // When the FlatList's visible height shrinks (keyboard rising,
-    // sticky-chip row appearing) and the user was at-bottom, keep them
-    // at-bottom. Without this, an in-flight bot bubble that was just
-    // rendered at the previous bottom edge ends up clipped behind the
-    // newly-raised input/keyboard. Only re-snap when the height
-    // actually shrunk and the user hasn't scrolled away.
-    if (
-      prevHeight > 0
-      && newHeight + 1 < prevHeight
-      && isAtBottomRef.current
-      && !userOverrideRef.current
-      && messagesRef.current.length > 0
-    ) {
-      // Use requestAnimationFrame so the layout pass completes before
-      // we issue the scroll — otherwise scrollToEnd uses the stale
-      // height for its target offset.
-      requestAnimationFrame(() => {
+  const onContentSizeChange = useCallback(
+    (_contentWidth: number, contentHeight: number) => {
+      // Update the canonical content-height *before* dispatching the
+      // scroll — snapToLatest reads it.
+      prevContentHeightRef.current = contentHeight;
+      if (userOverrideRef.current) return;
+      if (messagesRef.current.length === 0) return;
+      // Bulk arrival path: jump to bottom of the whole loaded thread
+      // without smart-snap (which would otherwise anchor to the top
+      // of the FIRST message for a very tall loaded thread).
+      if (isBulkArrivalRef.current) {
+        isBulkArrivalRef.current = false;
         listRef.current?.scrollToEnd({ animated: false });
-      });
-    }
-  }, []);
+        return;
+      }
+      snapToLatest(true);
+    },
+    [snapToLatest],
+  );
+
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const newHeight = e.nativeEvent.layout.height;
+      const prevHeight = listHeightRef.current;
+      listHeightRef.current = newHeight;
+      // When the FlatList's visible height shrinks (keyboard rising,
+      // sticky-chip row appearing) and the user was at-bottom, re-run
+      // smart-snap against the new viewport. Without this, an in-flight
+      // bot bubble that was just rendered at the previous bottom edge
+      // ends up clipped behind the newly-raised input/keyboard. Re-
+      // running smart-snap (not raw scrollToEnd) also handles the
+      // "fit before, doesn't fit now" case: a bubble that fit before
+      // the keyboard rose may overflow the smaller viewport, in which
+      // case we anchor to its top instead of jamming the user behind
+      // the keyboard.
+      if (
+        prevHeight > 0
+        && newHeight + 1 < prevHeight
+        && isAtBottomRef.current
+        && !userOverrideRef.current
+        && messagesRef.current.length > 0
+      ) {
+        // Use requestAnimationFrame so the layout pass completes before
+        // we issue the scroll — otherwise the scroll uses a stale
+        // viewport height for its target offset.
+        requestAnimationFrame(() => snapToLatest(false));
+      }
+    },
+    [snapToLatest],
+  );
 
   // Keyboard visibility: tracked so consumers (Composer, etc.) can drop
   // safe-area bottom padding while keyboard is showing — the keyboard
@@ -275,9 +377,7 @@ export function useChatScroll<T extends MinimalMessage>(
           // Slight delay so the keyboard animation completes its first
           // frame before we scroll — otherwise the scroll happens to
           // the pre-resize content edge.
-          setTimeout(() => {
-            listRef.current?.scrollToEnd({ animated: true });
-          }, 50);
+          setTimeout(() => snapToLatest(true), 50);
         }
       },
     );
@@ -286,9 +386,7 @@ export function useChatScroll<T extends MinimalMessage>(
       () => {
         setIsKeyboardVisible(false);
         if (isAtBottomRef.current && !userOverrideRef.current) {
-          setTimeout(() => {
-            listRef.current?.scrollToEnd({ animated: true });
-          }, 50);
+          setTimeout(() => snapToLatest(true), 50);
         }
       },
     );
@@ -296,11 +394,15 @@ export function useChatScroll<T extends MinimalMessage>(
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [snapToLatest]);
 
   const jumpToLatest = useCallback(() => {
     userOverrideRef.current = false;
     setPill(false);
+    // Explicit user request — always go to the bottom, not the smart-
+    // snap top-of-latest. They tapped a "↓ Latest" pill; they want
+    // the tail of the conversation, not the start of the most-recent
+    // long message.
     listRef.current?.scrollToEnd({ animated: true });
   }, [setPill]);
 
