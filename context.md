@@ -1,7 +1,7 @@
 # botella — handoff
 
 > A fresh Claude session can read this top-to-bottom and pick up the work
-> cold. Last updated 2026-05-08. If anything disagrees with the running
+> cold. Last updated 2026-05-10. If anything disagrees with the running
 > system, trust the system and update this file. The other authoritative
 > doc is `botella/spec.md` (current product spec). Core value:
 > *"we add value to the user."*
@@ -138,7 +138,213 @@ open.
   render as Telegram inline keyboard buttons; the section pagination
   uses Telegram's continue-chip pattern.
 
-**Test status:** 72 botella + 166 GombiStar tests pass.
+**Shipped 2026-05-09 → 2026-05-10 (two-day push):**
+
+This block is the most current state. If anything below conflicts
+with an older block above, trust this one.
+
+**Backend intelligence** (GombiStar):
+
+- **Aspect-pattern detector** (`services/chart_patterns.py`) — detects
+  sign-stelliums, **house-stelliums**, T-squares, grand trines, yods
+  with tight orbs. Sign and house stelliums reported as SEPARATE
+  patterns (a 6th-house cluster of Venus/Mars in Aquarius + Saturn/
+  Neptune in Capricorn is two distinct things; the LLM directive
+  explicitly says "don't merge their member planets"). Wired into
+  both `build_chat_context_block` and `generate_first_map_read`.
+- **Lifecycle markers** (`services/lifecycle_markers.py`) — age-based
+  detection of Saturn return / Uranus opposition / Pluto square /
+  Chiron return / Jupiter return / Nodal return etc. Surfaces
+  recent (past 2y) / active / approaching (next 2y) with a one-line
+  developmental theme per marker. Always-on in the chat context.
+- **Yearly forecast** (`services/yearly_forecast.py`) — explicit-ask
+  mode for "what's my year ahead". Pure aspect math on natal abs
+  longitudes vs sampled sky (today / +6mo / +12mo); detects slow-
+  planet transits at 2.5° orbs. Deduped across samples. Wired as a
+  `detect_yearly_forecast_intent` + `yearly_forecast_directive`
+  pair, embeds the computed timeline into the prompt and tells
+  Layla to render by theme, not as a transit list.
+- **Synastry** (`services/synastry.py`) — top-12 cross-chart aspects
+  between two charts. Detected at orbit-add time and CACHED on the
+  orbit person record (`synastry_aspects` field). Surfaced as one-
+  line sub-bullets per person in `orbit_summary` → so chat turns
+  about that person automatically have the actual cross-chart
+  contacts in context, instead of forcing the LLM to spot them in
+  raw chart dumps. `generate_compatibility_reading` rewritten with:
+  (a) embedded synastry block as the spine of the reading,
+  (b) type-specific `forbid` clauses preventing romance language in
+  family / friend / work readings,
+  (c) `role_freetext` ("my mom", "my best friend since college")
+  plumbed into the prompt verbatim.
+- **Intent-mode dispatch chain** (`botella_manifest.py:free_chat`):
+  articulation → soft-presence → comm-help → decision → yearly-
+  forecast → anchor-thread → person-mention → context block. Each
+  mode has its own regex detector + directive function in
+  `services/laila_chat.py`. New modes since 2026-05-08:
+  - **Soft-presence** — short vulnerable beats ("I'm tired",
+    "I feel stuck"). 1–3 sentences, no chart pull, no advice arc.
+  - **Decision mode** — "should I take this job", "torn between".
+    5-movement structure (tension / costs / one placement / timing
+    / one closing question), never decides.
+  - **Articulation mode** — "I don't have words for this". Layla
+    OFFERS 4-6 candidate words including somatic ones, never asks
+    for more detail.
+  - **Yearly forecast mode** — see above.
+  - **Anchor-question threading** — `current_moment.anchor_questions`
+    weaved back when a turn touches a recurring theme. EN works
+    deterministically with verbatim quotes; HE soft-threads when
+    seeded anchor language differs from reply language (documented
+    cross-lingual trade-off — directive instructs translate-inline
+    but LLM falls back to soft "you keep returning to this" on
+    occasion).
+- **Match-shape-to-ask preamble** in `personality/layla_system_prompt.md`
+  — single architectural fix that demoted the default Pattern → Cost
+  → Medicine arc to "use for chart synthesis, not every reply".
+  Priority rule: literal user ask wins > active mode directive >
+  anchor-thread > default arc. **Stopped the "linear-mode-per-failure"
+  trajectory** of needing a new mode for every felt-quality miss.
+  Also added an off-domain guardrail in the same file (refuses
+  trivia / general knowledge gracefully, one-sentence redirect).
+- **First-map-read streaming** (`flows/onboarding.py` +
+  `services/claude_service.py:generate_first_map_read_stream`) — THE
+  big latency win. The LLM call now streams; Section 1 is detected
+  the moment its boundary lands (second `##` header arrives in the
+  accumulator) and saved + signaled. `build_first_map` awaits only
+  the first pulse (~10-15s) instead of the full ~50s completion.
+  Sections 2-9 stream in the background; `emit_first_map`'s
+  `_ensure_section_at_idx` awaits a per-user `asyncio.Event` if the
+  user taps Continue before the next section is saved (was a
+  polling loop; replaced in the simplify pass — see below).
+- **Phase B quick wins** (alongside streaming): `max_tokens` 4500→3000
+  on the first map; explicit `reasoning_effort="medium"` for gpt-5
+  (plumbed as `Literal["low","medium","high"]` through
+  `services/llm.py:complete()` / `complete_stream()`); LivingMap
+  extraction moved to a fire-and-forget background task (was 3-5s
+  blocking).
+- **Background LivingMap tracking** — `_INFLIGHT_LIVING_MAP[user_id]`
+  exposes the bg task; tests + any future caller can `await` it
+  before reading `living_map` off the record.
+- **Onboarding intro restructure** (`flows/onboarding.py`):
+  language → **introduce_self** (Layla introduces herself by name,
+  asks "what should I call you?") → **got_intro_name** (captures
+  name + emits intention statement: "{name}, my intention is to
+  help you know yourself deeper, polish your strengths, become
+  aware of your blind spots…") → gender → trust opener → birth
+  data → save_chart → build_first_map. EN + HE. The legacy
+  `ask_name_if_needed` state is now a defensive no-op (name was
+  already captured upfront).
+
+**Frontend** (botella/layla-app + mobile-template):
+
+- **TTS voice-out** — full stack.
+  - Backend: `services/tts.py` + `POST /v1/tts/synthesize`. OpenAI
+    tts-1-hd, voice "shimmer" (warm female), in-process LRU cache
+    keyed by sha256(text+voice+model), 4000-char input cap,
+    per-user 10/min rate limit.
+  - Frontend: `voice/playback.ts` — singleton player on expo-audio
+    with `subscribePlaybackState` for cross-bubble state. **Listen
+    affordance** (`chat/Bubble.tsx:PlayButton`) renders under bot
+    bubbles ≥220 chars; transitions ▶ Listen → ⏸ Playing… → ▶ on
+    completion. Errors surface as the button label
+    (`Bubble.tsx:playButtonLabel`) instead of silent-fail.
+    Settings → Voice toggle (default OFF; gates initiation, not
+    affordance visibility). `getCurrentJwt` lives in
+    `auth/anonymous.ts` (re-exported by playback.ts for back-compat).
+  - Native iOS bug fixed end-to-end via the diagnostics system:
+    diagnostics surfaced "blob.arrayBuffer is not a function" — RN's
+    `Response.blob()` Blob doesn't implement arrayBuffer (web does).
+    Fix: skip Blob on native, read `arrayBuffer()` directly from the
+    Response. Plus `expo-file-system/legacy.writeAsStringAsync`
+    writes the base64 to a temp file → `file://` URI for AVPlayer
+    (data: URIs don't work with AVPlayer).
+- **Canonical chat scroll + keyboard contract**
+  (`mobile-template/src/chat/useChatScroll.ts`, copied verbatim to
+  `layla-app/src/chat/useChatScroll.ts`). The top-of-file header
+  now has 8 rules covering scroll AND keyboard, plus three exported
+  constants screens MUST import:
+  `KEYBOARD_VERTICAL_OFFSET_IOS = 44`,
+  `IDLE_KEYBOARD_DISMISS_MS = 3000`,
+  `isKeyboardVisible` (returned from the hook).
+  Rules cover: sticky-bottom on at-bottom, never yank reading users,
+  pill threshold, re-snap on FlatList shrink (keyboard rise / sticky
+  chip), re-snap on `Keyboard.didShow/Hide`, required
+  KeyboardAvoidingView setup, drop-bottom-safe-area when keyboard
+  is visible, 3s idle keyboard dismiss. **Discipline rule**:
+  ChatScreen / Bubble / Composer MUST NOT add ad-hoc `scrollToEnd`,
+  `scrollToIndex`, or `Keyboard.addListener` calls. Tune through
+  the constants in the hook, sync verbatim to mobile-template.
+- **iOS QuickType bar disabled** on the chat TextInput
+  (`autoCorrect={false}`, `spellCheck={false}`,
+  `autoComplete="off"`) — was visible noise plus stealing ~50px
+  above the keyboard.
+- **Shared base64 helper** (`src/lib/base64.ts`) — chunked variant
+  used by both `voice/playback.ts` and `chat/ImageLightbox.tsx`.
+  Replaces a byte-by-byte loop in playback that would stack-
+  overflow on long TTS payloads.
+
+**Operational** (cross-cutting):
+
+- **Automated build-info stamping** —
+  `.github/workflows/stamp-build.yml` in the GombiStar repo. On
+  every push to `main`, GitHub Actions runs
+  `scripts/stamp_build.py` which polls Northflank until the build
+  deploys, then GETs / merges / POSTs the runtime-environment with
+  the fresh `LAYLA_BUILD_VERSION` / `_NOTE` / `_TIME`. One-time
+  setup: `NORTHFLANK_TOKEN` GitHub secret (already configured
+  2026-05-09). **The manual ritual described in §6 below is dead.**
+- **User-POV test plan** (`GombiStar/mcp/user_pov_test_plan.md`)
+  — 10 felt-quality scenarios mapped to JTBDs (be seen / hold me
+  / decide / articulate / continuity etc.). Each has user-felt
+  pass signals (NOT code-correctness checks), explicit anti-
+  patterns, scorecard template. Includes a Hebrew section + the
+  cross-lingual anchor-threading caveat. **Now a ship-gate** for
+  prompt / directive changes per `CLAUDE.md` updates in both
+  repos: re-run any scenario the change intends to fix
+  (FAIL→PASS), spot-check 1-2 passing scenarios, ship-block on
+  any 5/5 → ≤3/5 regression, append verdict to commit message.
+  Screenshots live under `botella/screenshots/userpov-*.png`.
+- **GombiStar CLAUDE.md exists now** — minimal pointer file at
+  `~/Desktop/Coding/GombiStar/CLAUDE.md` so agents working inside
+  that repo find the rubric + ship gate + voice / dispatch order
+  conventions without having to know about the sister repo first.
+
+**Simplify pass shipped 2026-05-10** (commits
+GombiStar `dd5cab5`, Botella `f0791ac`):
+
+- `_ensure_section_at_idx` polling loop (75 storage reads worst-
+  case) → one `_SECTION_PROGRESS_EVENTS[uid]` asyncio.Event pulsed
+  by the streaming writer. Zero DB reads inside the wait loop.
+- `_SECTION_1_EVENTS` collapsed into `_SECTION_PROGRESS_EVENTS`
+  (same Event serves "section 1 ready" AND "section N landed" —
+  first pulse IS section 1).
+- Extracted `_build_first_map_request(chart_data, name, language)`
+  — streaming and non-streaming variants of
+  `generate_first_map_read` were duplicating ~25 lines of prompt
+  + chart-pattern injection. Now one source of truth; the two
+  callers can't diverge.
+- `reasoning_effort: ReasoningEffort` Literal type
+  (`"low"|"medium"|"high"`) replaces stringly-typed `str | None`.
+- `_first_map_and_save` return type cleaned: `(str, dict)` →
+  `str` (the dict was always `{}` since LivingMap moved to bg).
+- `_event_wait` one-liner wrapper inlined.
+- `getCurrentJwt` + `JWT_KEY` centralized in `auth/anonymous.ts`;
+  `voice/playback.ts` re-exports for back-compat.
+- `bytesToBase64` extracted to `lib/base64.ts` (chunked variant
+  used by both playback and ImageLightbox).
+- `playButtonLabel(playing, busy, errLabel)` helper replaces the
+  nested ternary in PlayButton.
+
+**Test status (current, 2026-05-10):**
+- **GombiStar**: 408 tests passing (was 166 on 2026-05-08).
+  New suites: `test_chart_patterns.py`, `test_synastry.py`,
+  `test_lifecycle_markers.py`, `test_yearly_forecast.py`,
+  `test_decision_intent.py`, `test_articulation_intent.py`,
+  `test_soft_presence.py`, `test_anchor_question_directive.py`,
+  `test_person_mention.py`, `test_tts.py`. Plus updated
+  `test_flows_onboarding.py` for the streaming first-map +
+  intro-upfront flow.
+- **Botella**: 72 tests passing (unchanged — framework tests).
+  TypeScript type-check clean on layla-app + mobile-template.
 
 The §12 stub at the bottom of this file describes the OLD pending
 redesign — that's been superseded by the live shipped version above
@@ -288,7 +494,13 @@ botella/                              public on GitHub: baraki123/Botella
 │       │   │                         <b>/<i> → markdown so Telegram-flavored
 │       │   │                         server copy works on iOS too.
 │       │   │                         useMemo around stripHtml.
-│       │   │                         Image-only message → edge-to-edge
+│       │   │                         Image-only message → edge-to-edge.
+│       │   │                         Bot bubbles ≥220 chars render a
+│       │   │                         gold ▶ Listen pill (PlayButton
+│       │   │                         subcomponent) for TTS playback.
+│       │   │                         Errors surface as the button
+│       │   │                         label (playButtonLabel helper),
+│       │   │                         not silent fail.
 │       │   ├── Composer.tsx          gradient send button; pulsing gold
 │       │   │                         ring on mic record state; safe-area
 │       │   │                         bottom inset from useSafeAreaInsets
@@ -306,26 +518,59 @@ botella/                              public on GitHub: baraki123/Botella
 │       │   │                         soft gold halo, same chrome size
 │       │   │                         as chat-flow chips.
 │       │   ├── TypingIndicator.tsx   3 breathing gold dots
+│       │   ├── useChatScroll.ts      CANONICAL scroll + keyboard contract.
+│       │   │                         8 rules in top-of-file header. Exports
+│       │   │                         KEYBOARD_VERTICAL_OFFSET_IOS,
+│       │   │                         IDLE_KEYBOARD_DISMISS_MS,
+│       │   │                         and an `isKeyboardVisible` flag.
+│       │   │                         Sync verbatim to mobile-template/.
+│       │   │                         ChatScreen / Bubble / Composer MUST
+│       │   │                         NOT add ad-hoc scrollToEnd /
+│       │   │                         scrollToIndex / Keyboard.addListener.
 │       │   ├── atmosphere/
 │       │   │   ├── Starfield.tsx     scattered SVG sparkles, twinkle loop
 │       │   │   └── Glow.tsx          stacked LinearGradients, fake radial
 │       │   └── types.ts              QuickReplyOption = string|{url}|{value}
+│       ├── lib/
+│       │   ├── useReducedMotion.ts   prefers-reduced-motion hook
+│       │   └── base64.ts             bytesToBase64() — chunked
+│       │                             String.fromCharCode.apply variant
+│       │                             (0x8000 chunks) used by ImageLightbox
+│       │                             AND voice/playback. The unchunked
+│       │                             byte-by-byte version stack-overflowed
+│       │                             on long TTS payloads; keep using this.
 │       ├── push/registerPush.ts      registers Expo token on session change.
 │       │                             expo-notifications + expo-device deps
 │       │                             installed; works in dev-client / TF.
-│       ├── settings/SettingsScreen.tsx  has "Link Telegram account" row.
-│       │                             Accepts onClose prop and renders a
-│       │                             "‹ Back" button. App.tsx renders
-│       │                             Settings as an absolute overlay on
-│       │                             ChatScreen (not a swap), so chat
-│       │                             keeps its message state across
-│       │                             open → back. (2026-05-07)
-│       └── voice/recorder.ts         expo-audio + MediaRecorder web fallback;
-│                                     setAudioModeAsync(allowsRecording=true)
-│                                     before record(); native upload uses
-│                                     {uri,type,name} multipart shape (web
-│                                     uses the Blob path); transcribe()
-│                                     posts /v1/voice
+│       ├── settings/SettingsScreen.tsx  has "Link Telegram account" row,
+│       │                             Voice toggle (default OFF), Admin
+│       │                             Build banner for admins. Accepts
+│       │                             onClose prop and renders a "‹ Back"
+│       │                             button. App.tsx renders Settings as
+│       │                             an absolute overlay on ChatScreen
+│       │                             (not a swap) so chat keeps its
+│       │                             message state across open → back.
+│       └── voice/
+│           ├── recorder.ts           expo-audio + MediaRecorder web fallback;
+│           │                         setAudioModeAsync(allowsRecording=true)
+│           │                         before record(); native upload uses
+│           │                         {uri,type,name} multipart shape (web
+│           │                         uses the Blob path); transcribe()
+│           │                         posts /v1/voice
+│           └── playback.ts           TTS playback singleton on expo-audio.
+│                                     Subscribe-pattern keeps multiple bubble
+│                                     PlayButtons in sync; only one bubble
+│                                     plays at a time. Fetches
+│                                     /v1/tts/synthesize, writes the audio
+│                                     to a real file via
+│                                     expo-file-system/legacy
+│                                     writeAsStringAsync (data: URIs don't
+│                                     work with AVPlayer on iOS native).
+│                                     Web uses URL.createObjectURL. JWT
+│                                     comes from auth/anonymous.getCurrentJwt
+│                                     (re-exported here for back-compat).
+│                                     Settings toggle in AsyncStorage gates
+│                                     initiation (not affordance visibility).
 │
 ├── mobile-template/                  Generic fork-point (kept in sync)
 ├── spec.md                           CURRENT product spec (chat-first
@@ -384,35 +629,62 @@ GombiStar/
 │   │                                 parsers in flows/people, flows/
 │   │                                 invite are still inline; migrate
 │   │                                 in a follow-up.)
-│   ├── onboarding.py                 chat-first redesign per spec.md:
-│                                       choose_lang → got_lang → ask_gender
-│                                       → got_gender → first_map_intro
-│                                       (trust-building line: "Before I
-│                                       ask anything about your life…")
-│                                       → ask_date → got_date (uses
-│                                       parse_dmy_strict) → ask_time →
-│                                       got_time → ask_place → got_place
-│                                       → geocode_place → disambiguate_place
-│                                       → ask_name_if_needed (ALWAYS asks
-│                                       — no shortcut on record.name)
-│                                       → got_name → save_chart (emits
-│                                       "I'm reading your chart now…") →
-│                                       build_first_map (idempotent, three
-│                                       resume gates: sections present /
-│                                       chart present / fresh) → emit_first_map
-│                                       (paginated: ONE section per state-
-│                                       hop with section-aware Continue
-│                                       chip "(N/9)" labels — "The whole
-│                                       picture", "Walk into who you are",
-│                                       "How you actually feel", "How you
-│                                       love", "Where your work lives",
-│                                       "What you don't see in yourself",
-│                                       "Who you're becoming", "Your life
-│                                       instruction") → got_first_map_continue
-│                                       → loops to next section. Final
-│                                       section emits + post-map pause +
-│                                       4 doorway chips (situation/person/
-│                                       question/reflect) → Done.
+│   ├── onboarding.py                 chat-first flow, streaming first map:
+│                                       choose_lang → got_lang →
+│                                       introduce_self ("Hi, nice to meet
+│                                       you. I'm Layla — astrologically-
+│                                       informed AI advisor. What should I
+│                                       call you?") → got_intro_name
+│                                       (captures name + emits the
+│                                       intention statement "{name}, my
+│                                       intention is to help you know
+│                                       yourself deeper, polish your
+│                                       strengths, become aware of your
+│                                       blind spots…") → ask_gender →
+│                                       got_gender → first_map_intro
+│                                       (trust opener) → ask_date →
+│                                       got_date (uses parse_dmy_strict)
+│                                       → ask_time → got_time → ask_place
+│                                       → got_place → geocode_place →
+│                                       disambiguate_place → save_chart
+│                                       (emits "Reading your chart now")
+│                                       → build_first_map (kerykeion +
+│                                       streaming LLM call; awaits ONLY
+│                                       the first-section pulse, ~10-15s
+│                                       — not the full ~50s completion).
+│                                       Three resume gates: sections
+│                                       present / chart present / fresh.
+│                                       → emit_first_map (paginated, ONE
+│                                       section per state-hop with
+│                                       section-aware Continue chip
+│                                       "(N/9)" labels: "The whole
+│                                       picture", "Walk into who you
+│                                       are", "How you actually feel",
+│                                       "How you love", "Where your work
+│                                       lives", "What you don't see in
+│                                       yourself", "Who you're becoming",
+│                                       "Your life instruction").
+│                                       _ensure_section_at_idx awaits an
+│                                       asyncio.Event if user taps
+│                                       Continue before next section is
+│                                       saved (was a polling loop pre-
+│                                       simplify-pass). → got_first_map_continue
+│                                       → loops. Final section emits +
+│                                       post-map pause + 4 doorway chips
+│                                       (situation/person/question/reflect)
+│                                       → Done.
+│                                       Module-level state dicts:
+│                                         _INFLIGHT_FIRST_MAP (streaming
+│                                           task per uid)
+│                                         _INFLIGHT_LIVING_MAP (bg
+│                                           extraction task per uid)
+│                                         _SECTION_PROGRESS_EVENTS
+│                                           (pulsed on every section save;
+│                                           one Event reused across all 9
+│                                           saves, cleared by waiter)
+│                                       ask_name_if_needed is now a
+│                                       defensive no-op (name captured
+│                                       upfront in got_intro_name).
 │   ├── settings.py                   menu/lang/gender/city. Replaces the
 │   │                                 dead handlers/settings.py path.
 │   ├── invite.py                     legacy invite flow (Telegram-anchored)
@@ -438,9 +710,13 @@ GombiStar/
 │   │                                 |openai). Per-call tier kwarg
 │   │                                 ("default" | "reasoning") picks
 │   │                                 model from per-provider map. Per-call
-│   │                                 model= kwarg honored ONLY when its
-│   │                                 prefix matches the active provider's
-│   │                                 family. Default models:
+│   │                                 reasoning_effort kwarg (ReasoningEffort
+│   │                                 = Literal["low","medium","high"])
+│   │                                 plumbed through to gpt-5's
+│   │                                 reasoning_effort param; ignored on
+│   │                                 anthropic/gemini. Per-call model=
+│   │                                 honored only when prefix matches.
+│   │                                 Default models:
 │   │                                   anthropic default/reasoning =
 │   │                                     claude-sonnet-4-6
 │   │                                   gemini   default = gemini-2.5-flash
@@ -451,28 +727,40 @@ GombiStar/
 │   │                                 per-tier via LAYLA_LLM_MODEL_DEFAULT
 │   │                                 / _REASONING.
 │   ├── claude_service.py             ALL Layla-side LLM functions.
-│   │                                 NEW for redesign:
+│   │                                 First-map functions:
 │   │                                   generate_first_map_read
-│   │                                     (deep 9-section, reasoning tier,
-│   │                                     no system prompt — the .md
-│   │                                     file IS the prompt)
-│   │                                   extract_living_map (JSON)
+│   │                                     (sync, blocking) — used by legacy
+│   │                                     callers (Telegram, full-text
+│   │                                     downstream consumers).
+│   │                                   generate_first_map_read_stream
+│   │                                     (async generator) — the HOT
+│   │                                     PATH for onboarding. Both share
+│   │                                     _build_first_map_request to
+│   │                                     prevent divergence.
+│   │                                     reasoning_effort="medium",
+│   │                                     max_tokens=3000.
+│   │                                 Other JSON / synthesis calls:
+│   │                                   extract_living_map (JSON,
+│   │                                     fire-and-forget background)
 │   │                                   extract_moment_update (JSON delta)
 │   │                                   detect_orbit_intent (JSON)
 │   │                                   generate_orbit_dynamic_summary (JSON)
+│   │                                   generate_compatibility_reading
+│   │                                     (synastry-aware; reasoning tier;
+│   │                                     type-specific forbid clauses for
+│   │                                     family/friend/love/work; uses
+│   │                                     role_freetext when present)
 │   │                                   communication_help_directive
 │   │                                 chat_with_advisor[_stream] +
 │   │                                   _build_chat_with_advisor_prompt
 │   │                                   take a `system_extras: list[str]`
 │   │                                   (replaces the old extra_context +
-│   │                                   mode_directive sprawl). Caller
-│   │                                   composes the ordered prompt list.
+│   │                                   mode_directive sprawl).
 │   │                                 Existing: generate_chart_teaser,
 │   │                                 generate_placement_card,
 │   │                                 generate_daily_reading,
 │   │                                 generate_checkin_opener,
 │   │                                 generate_person_transit_alert,
-│   │                                 generate_compatibility_reading,
 │   │                                 generate_lesson, interpret_natal_chart
 │   │                                 — all reasoning tier.
 │   │                                 chat_with_advisor / _stream,
@@ -493,19 +781,54 @@ GombiStar/
 │   │                                 three layers), dedup_capped (used
 │   │                                 by anchor_questions + active_*
 │   │                                 lists), _now_iso, doorway_chips.
-│   ├── laila_chat.py                 NEW. Chat-turn helpers:
+│   ├── laila_chat.py                 Chat-turn helpers + intent-mode
+│   │                                 detectors + directive builders.
+│   │                                 Original (pre-2026-05-09):
 │   │                                   detect_doorway_token,
 │   │                                   doorway_first_reply (static),
-│   │                                   detect_communication_help (regex),
+│   │                                   detect_communication_help,
+│   │                                   communication_help_directive,
+│   │                                   detect_person_mention (regex
+│   │                                     fast-path + _NAME_STOP_WORDS
+│   │                                     filter that rejects pronouns/
+│   │                                     contractions/articles as
+│   │                                     "names" — fixed the "Add I'm"
+│   │                                     bug from 2026-05-09),
+│   │                                   person_mention_directive,
 │   │                                   handle_orbit_pending_turn (table-
-│   │                                     driven: _ORBIT_NEXT_PROMPT +
-│   │                                     _advance_orbit_stage +
-│   │                                     _orbit_confirmation),
+│   │                                     driven, multi-stage),
+│   │                                   emit_orbit_person_with_chart
+│   │                                     (computes + caches synastry
+│   │                                     on the orbit person record),
 │   │                                   begin_orbit_suggestion,
 │   │                                   take_queued_orbit_suggestion,
-│   │                                   schedule_moment_update + _do_moment_update,
-│   │                                   schedule_orbit_detect + _do_orbit_detect,
+│   │                                   schedule_moment_update,
+│   │                                   schedule_orbit_detect,
 │   │                                   remember_anchor_question.
+│   │                                 Modes added 2026-05-09 / 05-10:
+│   │                                   detect_articulation_intent +
+│   │                                     articulation_mode_directive
+│   │                                     ("I don't have words" — OFFER
+│   │                                     candidate words, no chart pivot)
+│   │                                   detect_soft_presence +
+│   │                                     soft_presence_directive
+│   │                                     (short vulnerable dumps —
+│   │                                     1-3 sentences, no chart,
+│   │                                     ONE observation OR ONE Q)
+│   │                                   detect_decision_intent +
+│   │                                     decision_mode_directive
+│   │                                     (5-movement, never decides)
+│   │                                   detect_yearly_forecast_intent +
+│   │                                     yearly_forecast_directive
+│   │                                     (embeds the computed timeline)
+│   │                                   anchor_question_directive
+│   │                                     (threads recurring user
+│   │                                     questions when topic touches)
+│   │                                 Dispatch order in free_chat:
+│   │                                   articulation → soft-presence →
+│   │                                   comm-help → decision →
+│   │                                   yearly-forecast → anchor-thread
+│   │                                   → person-mention → context block.
 │   │                                 INFLIGHT dicts use asyncio.current_task()
 │   │                                 identity-check before pop in finally
 │   │                                 — fix for the cancelled-task wiping
@@ -531,7 +854,58 @@ GombiStar/
 │   │                                 away from recent_ids history.
 │   │                                 Gender-aware Hebrew variants
 │   │                                 (.he.md masc default, .he.f.md fem).
-│   ├── transit_service.py            transit calc + scoring
+│   ├── transit_service.py            transit calc + scoring (today only —
+│   │                                 NOT the forecast path).
+│   ├── yearly_forecast.py            12-month slow-transit forecast.
+│   │                                 Pure aspect math on natal abs
+│   │                                 longitudes vs sampled sky (today /
+│   │                                 +6mo / +12mo). Detects conjunction /
+│   │                                 opposition / square / trine /
+│   │                                 sextile / quincunx with tight orbs.
+│   │                                 Deduped across samples — outer
+│   │                                 planets that stay within 1° for
+│   │                                 years surface once.
+│   ├── lifecycle_markers.py          age-based developmental milestones
+│   │                                 from birth date alone. Covers
+│   │                                 Saturn return (29.5, 59), Saturn
+│   │                                 opposition (mid-life), Uranus
+│   │                                 opposition (40.5-42.5), Pluto
+│   │                                 square mid-life, Chiron return,
+│   │                                 Jupiter return (every 11.86y),
+│   │                                 Nodal return (18.6y), Nodal
+│   │                                 opposition (9.3y). Each marker has
+│   │                                 a one-line developmental theme.
+│   │                                 Flows into build_chat_context_block
+│   │                                 always-on.
+│   ├── chart_patterns.py             detects structural aspect patterns
+│   │                                 in a natal chart: sign-stelliums,
+│   │                                 HOUSE-stelliums (separate),
+│   │                                 T-squares, grand trines, yods.
+│   │                                 Sign and house stelliums REPORTED
+│   │                                 SEPARATELY — a 6th-house cluster
+│   │                                 (life domain) is a different
+│   │                                 pattern than a Capricorn cluster
+│   │                                 (flavor). Wired into both
+│   │                                 build_chat_context_block AND
+│   │                                 generate_first_map_read prompt.
+│   ├── synastry.py                   top-12 cross-chart aspects between
+│   │                                 two natal charts. Tight orbs (6°
+│   │                                 major, 5° minor, 3° quincunx).
+│   │                                 Score-weighted by planet pair +
+│   │                                 tightness (luminary contacts >
+│   │                                 outer×outer > personal×personal).
+│   │                                 Computed once at orbit-add and
+│   │                                 cached on the orbit person record;
+│   │                                 surfaced as sub-bullets in
+│   │                                 orbit_summary so chat turns about
+│   │                                 that person have the synastry data
+│   │                                 without re-deriving.
+│   ├── tts.py                        text-to-speech via OpenAI tts-1-hd.
+│   │                                 Voice "shimmer" default; 4000-char
+│   │                                 input cap; in-process LRU cache
+│   │                                 keyed by sha256(text+voice+model).
+│   │                                 Per-user rate limit (10/min) in
+│   │                                 bot_botella.py route handler.
 │   ├── transcribe.py                 Whisper. _sniff_extension reads
 │   │                                 magic bytes (ftyp/OggS/RIFF/EBML/
 │   │                                 fLaC/ID3/MP3) so iOS m4a doesn't
@@ -539,10 +913,12 @@ GombiStar/
 │   └── build_info.py                 returns sha + note + commit_time +
 │                                     boot_time. Resolution: env first
 │                                     (LAYLA_BUILD_VERSION / _NOTE /
-│                                     _TIME), then files baked at Docker
-│                                     build (rare on Northflank — strips
-│                                     .git from build context), then live
-│                                     git (local), then "dev".
+│                                     _TIME — stamped automatically by
+│                                     .github/workflows/stamp-build.yml
+│                                     in GombiStar), then files baked at
+│                                     Docker build (rare on Northflank —
+│                                     strips .git from build context),
+│                                     then live git (local), then "dev".
 │
 ├── database/
 │   ├── schema.sql                    layla_users, layla_natal_charts
@@ -597,9 +973,41 @@ GombiStar/
 │                                     for ref. handlers/daily.py:
 │                                     get_or_generate_daily still used by
 │                                     services/daily_runner.py)
-├── tests/                            166 passing (added test_laila_chat
-│                                       + rewrote test_flows_onboarding
-│                                       for the chat-first flow).
+├── tests/                            408 passing (as of 2026-05-10).
+│                                       Newer suites: test_chart_patterns,
+│                                       test_synastry, test_lifecycle_markers,
+│                                       test_yearly_forecast, test_articulation
+│                                       _intent, test_soft_presence,
+│                                       test_decision_intent, test_anchor_
+│                                       question_directive, test_person_
+│                                       mention, test_tts. Rewritten:
+│                                       test_flows_onboarding (intro-
+│                                       upfront + streaming first map).
+├── mcp/                              Playwright-driven E2E + user-POV
+│   ├── user_pov_test_plan.md         CANONICAL felt-quality rubric.
+│   │                                 10 scenarios, JTBD-mapped. NOW THE
+│   │                                 SHIP GATE for any prompt /
+│   │                                 directive / dispatch-order change
+│   │                                 — see CLAUDE.md in both repos.
+│   ├── audit_voice_flow.py           voice/transcribe end-to-end
+│   ├── test_*.py                     mid-flow / chart / invite tests
+│   └── telegram_user_mcp.py          Telethon harness
+├── scripts/
+│   └── stamp_build.py                runs in CI (.github/workflows/
+│                                     stamp-build.yml); polls Northflank
+│                                     until the pushed commit is
+│                                     deployed, then GETs/merges/POSTs
+│                                     LAYLA_BUILD_VERSION / _NOTE / _TIME
+│                                     into runtime env. Standalone
+│                                     callable locally as a fallback.
+├── .github/workflows/stamp-build.yml runs on push to main +
+│                                     workflow_dispatch. Needs
+│                                     NORTHFLANK_TOKEN as a GitHub
+│                                     Secret (configured 2026-05-09).
+├── CLAUDE.md                         agent map for this repo (was added
+│                                     2026-05-09). Points at
+│                                     mcp/user_pov_test_plan.md +
+│                                     ship-gate language.
 └── Dockerfile                        FROM gombicreations/laylabot-base.
                                        apt installs git (pip needs it).
                                        COPY . . (.git stripped by
@@ -756,8 +1164,11 @@ the pushed commit is deployed, then GETs / merges / POSTs the
 runtime-environment with the fresh `LAYLA_BUILD_VERSION`,
 `LAYLA_BUILD_NOTE`, and `LAYLA_BUILD_TIME`. No human touches it.
 
-One-time setup (per repo, ever): the workflow needs the Northflank
-API token in GitHub Secrets as `NORTHFLANK_TOKEN`:
+One-time setup (already done 2026-05-09): the workflow needs the
+Northflank API token in GitHub Secrets as `NORTHFLANK_TOKEN`.
+Verified live with `gh secret list --repo baraki123/GombiStar`.
+
+If the secret ever gets rotated, re-run:
 
 ```bash
 # Inside the GombiStar repo:
@@ -785,7 +1196,7 @@ NORTHFLANK_TOKEN=$(grep '^NORTHFLANK_TOKEN' .env | cut -d= -f2) \
 cd ~/Desktop/Coding/GombiStar && source venv/bin/activate
 
 # Tests
-python -m pytest tests/ -q                        # 128 passing
+python -m pytest tests/ -q                        # 408 passing (2026-05-10)
 
 # Local backend (against prod Neon — be careful!)
 LAYLA_DISABLE_SCHEDULER=1 uvicorn bot_botella:app --host 0.0.0.0 --port 8000
@@ -896,6 +1307,58 @@ cd ~/Desktop/Coding/botella && source venv/bin/activate && python -m pytest -q
   communication-help directive comes BEFORE Map+Moment+Orbit context.
   Earlier extras win on framing; later ones provide background. The
   current order in `botella_manifest.free_chat` is the calibrated one.
+- **React Native Blob doesn't implement `.arrayBuffer()`.** Web's
+  Blob does; RN's doesn't. If you need bytes off a `fetch` Response on
+  native, read `await res.arrayBuffer()` DIRECTLY from the Response,
+  never through Blob. Symptom of forgetting: a surfaced error
+  "blob.arrayBuffer is not a function" — the diagnostics in
+  `voice/playback.ts` will catch this on the button label.
+- **AVPlayer / ExoPlayer reject `data:` URIs.** A `data:audio/mpeg;
+  base64,…` URI passed to `expo-audio.createAudioPlayer` stalls in a
+  never-loaded state on iOS / Android native (Listen button "Loading…"
+  forever). Always write the bytes to a real file via
+  `expo-file-system/legacy.writeAsStringAsync({ encoding: Base64 })`
+  and play from `file://`. Web's `URL.createObjectURL(blob)` is fine.
+- **iOS QuickType suggestions bar covered the input** until we set
+  `autoCorrect={false}`, `spellCheck={false}`, `autoComplete="off"`
+  on the chat TextInput. Don't re-enable autoCorrect without
+  re-tuning `KEYBOARD_VERTICAL_OFFSET_IOS`.
+- **Chat scroll + keyboard contract is canonical in one file.**
+  `mobile-template/src/chat/useChatScroll.ts` (copied verbatim to
+  `layla-app/`). 8 rules in the top-of-file header, three exported
+  constants (`KEYBOARD_VERTICAL_OFFSET_IOS=44`,
+  `IDLE_KEYBOARD_DISMISS_MS=3000`, `isKeyboardVisible` returned from
+  the hook). Composer + ChatScreen + Bubble MUST import the
+  constants, never re-declare. **No ad-hoc `scrollToEnd` /
+  `scrollToIndex` / `Keyboard.addListener` in product chat
+  surfaces** — tune through the hook, sync to both forks.
+- **Cross-lingual anchor threading degrades to soft.** Anchor
+  questions are stored in the language they were captured in. When
+  user lang differs from seed lang, the directive instructs Layla to
+  translate-and-quote inline, but the LLM frequently falls back to a
+  soft "you keep returning to this point" instead of a verbatim
+  translated quote. Acceptable trade-off; documented in
+  `mcp/user_pov_test_plan.md`. If the hard verbatim is ever needed,
+  stronger imperative + a translation pre-pass would do it.
+- **Northflank build stamping is automated now.** Don't run the
+  manual GET-merge-POST ritual from §6 unless the workflow is
+  broken. `.github/workflows/stamp-build.yml` fires on every push
+  to main; needs `NORTHFLANK_TOKEN` GitHub Secret (configured).
+- **Streaming first-map awaits a per-user `asyncio.Event`,
+  not the full task.** `build_first_map` returns to the dispatcher
+  the moment Section 1 lands (~10-15s). Sections 2-9 stream in the
+  background. If a user taps Continue before the next section is
+  saved, `_ensure_section_at_idx` awaits
+  `_SECTION_PROGRESS_EVENTS[uid]` (pulsed by the writer).
+  `_INFLIGHT_FIRST_MAP[uid]` tracks the live task for resume gates.
+- **`generate_first_map_read` (sync) and `_stream` (async iterator)
+  share `_build_first_map_request`.** Don't update one without the
+  other — the helper is the single source of truth so non-streaming
+  and streaming runs produce identical quality.
+- **Reasoning tier model is gpt-5.4 by default.** Pass
+  `reasoning_effort="medium"` for first-map / forecast calls where
+  speed matters; "high" only when truly needed (rare — empirically
+  "medium" holds quality on dense chart-grounded prompts).
 
 ---
 
@@ -923,6 +1386,37 @@ cd ~/Desktop/Coding/botella && source venv/bin/activate && python -m pytest -q
 - **Build provenance via env, not git-in-image.** Northflank strips
   `.git` from the build context; stamping env after push is more
   reliable than baking files into the image.
+- **One canonical chat scroll + keyboard contract.** All scroll +
+  keyboard behavior lives in `useChatScroll.ts`. Three exported
+  constants (`KEYBOARD_VERTICAL_OFFSET_IOS`,
+  `IDLE_KEYBOARD_DISMISS_MS`, `isKeyboardVisible`). Tune through the
+  hook only, sync verbatim to mobile-template/.
+- **One canonical user-POV rubric** at
+  `GombiStar/mcp/user_pov_test_plan.md`. It IS the ship gate for
+  prompt / directive / dispatch-order changes — re-run any scenario
+  the change intends to fix (FAIL→PASS), spot-check 1-2 passing
+  scenarios, ship-block on 5/5 → ≤3/5 regression, append verdict to
+  commit. Don't fork the rubric per scenario.
+- **Match-shape-to-ask preamble + priority pyramid** in
+  `personality/layla_system_prompt.md` instead of a new per-mode
+  directive for every felt-quality miss. The default arc (Pattern →
+  Cost → Medicine) is for chart synthesis; literal user ask wins
+  over default arc. Stopped the "linear-mode-per-failure"
+  trajectory.
+- **Streaming first map is the hot path.** `generate_first_map_read`
+  (sync) survives for legacy callers; new code uses
+  `generate_first_map_read_stream`. Both share
+  `_build_first_map_request` — never let them diverge.
+- **LivingMap extraction is fire-and-forget.** Off the critical
+  path; chat falls back to raw chart context if missing.
+  `_INFLIGHT_LIVING_MAP[user_id]` lets tests await when needed.
+- **Synastry cached on orbit-add.** Top-12 cross-chart aspects
+  computed once when the orbit person is added, persisted on the
+  orbit record. Surfaced in every chat turn about that person via
+  `orbit_summary` sub-bullets. Don't recompute per turn.
+- **TTS provider is OpenAI tts-1-hd, voice "shimmer".** Caching
+  is in-process LRU keyed by sha256(text+voice+model). Rate limit
+  10/min/user enforced at the route handler.
 
 ---
 
@@ -930,19 +1424,38 @@ cd ~/Desktop/Coding/botella && source venv/bin/activate && python -m pytest -q
 
 | # | Item | Size | Notes |
 |---|------|------|-------|
-| 1 | **Sensual/paced text reveal for the first map sections** (user-requested 2026-05-08) | ~2-3h | The user wants Layla's words to "come to life" on the first map read. Recommended path: server-side switch the section emit from `text(...)` to `token(...)` stream with `await asyncio.sleep(0.04)` per word + `0.25-0.4s` breaths at sentence-end / heading boundaries; iOS already has the gold-caret streaming-bubble path. Add a tap-to-skip on the streaming bubble for users who want to scan. Tradeoff: stretches each section from ~instant to ~6-12s of paced reveal. |
-| 2 | **Apple Sign-In name → onboarding skip** | ~1h | `auth/routes.py` stores Apple-provided names as `apple_given_name`/`apple_family_name` (not `name`). `ask_name_if_needed` always asks now. If you want Apple users to skip the prompt, prefer `record.get("apple_given_name")` (or build a single canonical `display_name` field on first auth) and check that — not `record.name`. |
-| 3 | **Mark blocked Telegram users inactive in `daily_runner`** | ~30 min | Telegram returns 403 Forbidden when the user has blocked the bot (saw one on 2026-05-07: tg_id 7933050328). The daily push job logs a warning and continues, but it'll keep trying that user every day forever. Catch the 403, set a `daily_push_disabled` flag (or `blocked_at` timestamp) on their row, and skip them on subsequent runs. |
-| 4 | **`_strip_json_fence` retrofit on existing JSON callers** | ~30 min | `intake_next_question`, `extract_intake_people`, the check-in opener at `services/claude_service.py:757` — all `json.loads(raw.strip())` directly. If Claude/GPT ever wraps the response in ```json fences, those callers misbehave. Apply the new `_strip_json_fence` helper to them too. |
-| 5 | **DMY parser duplication** | ~30 min | `flows/_shared.py` was extracted in the simplification pass and used in `flows/onboarding:got_date` + `services/laila_chat:handle_orbit_pending_turn`. `flows/people.py:205` and `flows/invite.py:241` still have inline `_DATE_RE` copies; migrate them. |
-| 6 | **Personality + reading-quality rewrite** (carried from 2026-05-06) | ~3-4h | Direction: readings should always identify aspects + patterns (T-squares, stelliums, conjunctions, oppositions) — not just placements. Always have a thesis. Tone: direct, literary, slightly intense — not corporate, not bubbly. Voice register: "you are not here to skim the surface of life" / "the immature version argues with reality... the mature version is a spiritual warrior-intellectual". Now mostly applies to the NEW `personality/first_map_read_prompt.md` + the chat-with-advisor system prompt; the legacy `natal_reading_prompt.md` is no longer the hot path. `services/chart_service.py:build_natal_chart` needs to capture nodes + Chiron (kerykeion has `mean_node`, `true_node`, `chiron`). |
-| 7 | **Communication-help mode end-to-end test** | ~30 min | Implementation is shipped (`detect_communication_help` + `communication_help_directive` in `services/laila_chat.py`/`claude_service.py`), but no end-to-end test confirms the 4-part response shape (underneath / what to avoid / try this / why it works). Add an MCP-driven test that pastes a "help me reply to Maya" turn and asserts the response shape. |
-| 8 | **Admin needs to /link or be allowlisted** | trivial | The admin (Barak, TG id 521866882) needs to either send `/link` from Telegram and redeem in iOS, OR send their iOS user_id (visible in `/v1/me` response) so it goes into `LAYLA_ADMIN_USER_IDS`. Until then, the build banner won't fire for them. |
-| 9 | **App Store Connect / EAS Build / TestFlight** | user-only | Blocked on $99 Apple Dev account enrollment. bundle id `app.layla.ios`, eas.json profiles ready. |
-| 10 | **Real designer pass on app icon** | TBD | The 2026-05-04 stopgap (italic gold L + sparkle) is fine for TestFlight; replace before public submission. |
-| 11 | **Anonymous-iOS users get morning push too** | ~half day | `services/daily_runner.py` only iterates `layla_users` (Telegram-keyed). Pure-anonymous users with chart in `layla_user_records.data.natal_chart` get nothing until they /link or sign in with Apple. |
-| 12 | **Move Northflank to a us-east cluster** | ~30 min | Drops Neon round-trip from ~30ms to <5ms. Service-recreate (no in-place region change). Do at the next staging-needed moment. |
-| 13 | **Skia / interactive chart (v2)** | ~2 days | `@shopify/react-native-skia` would let us pinch-zoom the wheel, animate planet highlights as Layla reads each placement, tap a planet to dive in. NOT v1. Bookmark for after launch. |
+| 1 | **iOS Listen button verification on real device** | user-only | User has tapped + reports the Blob.arrayBuffer error label (diagnostics worked). The fix landed in commit `7fb8f50` and the simplify pass `f0791ac`. Awaiting confirmation that audio actually plays after Expo Go reload. Tunnel URL `exp://zfr6ho4-anonymous-8081.exp.direct` is currently live (Expo restarted 2026-05-10). |
+| 2 | **Maestro + Xcode install for simulator-driven iOS test loop** | ~3h user + 30min agent | Currently can't drive an iOS simulator from here — only Command Line Tools is installed (no full Xcode → no `xcrun simctl`). Installing full Xcode (Mac App Store, ~30GB) + `brew install maestro` would unlock iOS-native verification from the agent side (boot simulator, openurl the tunnel, tap Listen, screenshot). Worth it as TTS / Apple Sign-In / push paths multiply. |
+| 3 | **Cross-lingual anchor threading hard-verbatim** | ~1h | When user lang differs from anchor seed lang, Layla soft-threads ("you keep returning to this") instead of translating-and-quoting the seeded English question into Hebrew. Documented trade-off; a stronger directive imperative or translation pre-pass would lock it down. Only matters if you have HE-speaking users with EN-seeded anchors. |
+| 4 | **Yearly forecast for #2 — Mars/Venus/Mercury cycles** | ~half day | Current `yearly_forecast.py` covers slow planets (Jupiter / Saturn / Uranus / Neptune / Pluto) only. Personal-planet returns (Mars ~2y, Venus 1y) are interesting "this month" hooks that could feed daily/monthly check-ins. Out of scope for the main forecast — bookmark for a separate "monthly transit alert" feature. |
+| 5 | **Articulation / soft-presence cross-test in Hebrew** | ~30 min | EN paths verified via MCP rubric runs 2026-05-09. HE paths verified for soft-presence + off-domain + articulation (all PASS); cross-lingual anchor #9 PARTIAL. Re-running all 4 HE scenarios after a substantive prompt change is the recommended discipline (already documented in mcp/user_pov_test_plan.md). |
+| 6 | **Apple Sign-In name → onboarding skip** | ~1h | `auth/routes.py` stores Apple-provided names as `apple_given_name`/`apple_family_name` (not `name`). `got_intro_name` always asks. If you want Apple users to skip the prompt, prefer `record.get("apple_given_name")` and pre-populate `session.data["name"]` before `introduce_self` enters. |
+| 7 | **Mark blocked Telegram users inactive in `daily_runner`** | ~30 min | Telegram returns 403 Forbidden when the user has blocked the bot (saw one on 2026-05-07: tg_id 7933050328). The daily push job logs a warning and continues, but it'll keep trying that user every day forever. Catch the 403, set a `daily_push_disabled` flag (or `blocked_at` timestamp) on their row, and skip them on subsequent runs. |
+| 8 | **`_strip_json_fence` retrofit on existing JSON callers** | ~30 min | `intake_next_question`, `extract_intake_people`, the check-in opener — all `json.loads(raw.strip())` directly. If GPT ever wraps the response in ```json fences, those callers misbehave. Apply the new `_strip_json_fence` helper. |
+| 9 | **DMY parser duplication** | ~30 min | `flows/_shared.py` is used in `flows/onboarding:got_date` + `services/laila_chat:handle_orbit_pending_turn`. `flows/people.py:205` and `flows/invite.py:241` still have inline `_DATE_RE` copies; migrate them. |
+| 10 | **Admin needs to /link or be allowlisted** | trivial | The admin (Barak, TG id 521866882) needs to either send `/link` from Telegram and redeem in iOS, OR send their iOS user_id (visible in `/v1/me` response) so it goes into `LAYLA_ADMIN_USER_IDS`. Until then, the build banner won't fire for them. |
+| 11 | **App Store Connect / EAS Build / TestFlight** | user-only | Blocked on $99 Apple Dev account enrollment. bundle id `app.layla.ios`, eas.json profiles ready. |
+| 12 | **Real designer pass on app icon** | TBD | The 2026-05-04 stopgap (italic gold L + sparkle) is fine for TestFlight; replace before public submission. |
+| 13 | **Anonymous-iOS users get morning push too** | ~half day | `services/daily_runner.py` only iterates `layla_users` (Telegram-keyed). Pure-anonymous users with chart in `layla_user_records.data.natal_chart` get nothing until they /link or sign in with Apple. |
+| 14 | **Move Northflank to a us-east cluster** | ~30 min | Drops Neon round-trip from ~30ms to <5ms. Service-recreate (no in-place region change). Do at the next staging-needed moment. |
+| 15 | **Skia / interactive chart (v2)** | ~2 days | `@shopify/react-native-skia` would let us pinch-zoom the wheel, animate planet highlights as Layla reads each placement, tap a planet to dive in. NOT v1. Bookmark for after launch. |
+| 16 | **Diagnostic logs in TTS playback** | ~10 min | `voice/playback.ts` ships with `[tts] togglePlay v2-tempfile` console logs + a `PLAYBACK_VERSION` probe — temporary while debugging the iOS Blob bug. Remove once user confirms Listen works end-to-end on device. |
+| – | **Streaming first map (Section 1 in ~10-15s)** | DONE | Shipped 2026-05-10. Commits `ac60168` (Phase A streaming) + `a6c57c8` (Phase B quick wins). Section 1 emit window: 8-15s. |
+| – | **Synastry-aware connection readings + caching** | DONE | Shipped 2026-05-09. Commit `8461eeb` (synastry detection + type guardrails) + `78ecbcf` (cache on orbit person). |
+| – | **Chart-pattern depth (sign + house stelliums separately)** | DONE | Shipped 2026-05-09. Commit `3caa146` then `64c6b72` (house-stellium addition). |
+| – | **Decision mode + Articulation mode + Soft-presence + Yearly forecast** | DONE | Shipped 2026-05-09 → 05-10. Modes wired through `botella_manifest.free_chat` dispatch chain. |
+| – | **Match-shape-to-ask preamble + off-domain guardrail** | DONE | Shipped 2026-05-09. Generalized architectural fix in `personality/layla_system_prompt.md` — stopped the "new mode per failure" trajectory. |
+| – | **Lifecycle markers** | DONE | Shipped 2026-05-09. `services/lifecycle_markers.py`; flows into chat context. |
+| – | **TTS voice-out backend + frontend** | DONE | Shipped 2026-05-09 / 05-10. `services/tts.py` + `POST /v1/tts/synthesize` + `voice/playback.ts` + PlayButton + Settings toggle. Native iOS path verified via diagnostics chain. Awaiting user-tap confirmation on real device. |
+| – | **Automated Northflank build-info stamping** | DONE | Shipped 2026-05-09. Commit `8876f47`. GitHub Actions workflow `.github/workflows/stamp-build.yml` + `scripts/stamp_build.py`. `NORTHFLANK_TOKEN` GitHub secret configured. Manual ritual is dead. |
+| – | **Onboarding intro restructure** | DONE | Shipped 2026-05-10. Commit `57b9b6a`. Layla introduces herself + asks name UPFRONT; intention statement before gender. |
+| – | **User-POV test plan as ship gate** | DONE | Shipped 2026-05-09. `mcp/user_pov_test_plan.md` + ship-gate language in both repos' CLAUDE.md. |
+| – | **Canonical scroll + keyboard contract (8 rules)** | DONE | Shipped 2026-05-09 / 05-10. `useChatScroll.ts` owns it all; 3 exported constants. |
+| – | **TTS Blob.arrayBuffer fix** | DONE | Shipped 2026-05-10. Commit `7fb8f50`. RN doesn't implement Blob.arrayBuffer; read from Response directly. |
+| – | **Simplify pass (polling→events, JWT centralization, base64 helper, etc.)** | DONE | Shipped 2026-05-10. Commits `dd5cab5` (GombiStar) + `f0791ac` (botella). |
+| – | **Sensual/paced text reveal for first map sections** | OBSOLETE | Was a pre-streaming wish. Streaming + per-section pagination give the same "Layla unfolds her read" feel without per-token sleep. Drop this item. |
+| – | **Personality + reading-quality rewrite** | OBSOLETE | Covered by 2026-05-09 chart-pattern + synastry + decision-mode + match-shape work. Voice file untouched (it was already strong); the depth came from injecting structured chart data into the prompt. |
+| – | **Communication-help mode end-to-end test** | OBSOLETE | Now covered by the user-POV rubric (#3 comm-help scenario, verified 2026-05-09). |
 | – | **Chat-first Map+Moment+Orbit redesign** | DONE | Shipped 2026-05-08. spec.md saved; new prompt + data layer + onboarding rewrite + free_chat overhaul + iOS doorway chips + paginated 9-section reveal. SHA `0565530b` then `400b80c`. |
 | – | **Viewport-stable scroll + Latest pill threshold** | DONE | Shipped 2026-05-08. Completed bot bubbles never yank; pill only shows when user is more than one viewport above bottom. (botella commits f8fb6af + later) |
 | – | **Section-aware Continue chip labels** | DONE | Shipped 2026-05-08. "The whole picture (2/9) →" through "Your life instruction (9/9) →". Hebrew labels included. (commit 0565530) |
