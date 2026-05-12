@@ -1,7 +1,7 @@
 # botella — handoff
 
 > A fresh Claude session can read this top-to-bottom and pick up the work
-> cold. Last updated 2026-05-10. If anything disagrees with the running
+> cold. Last updated 2026-05-12. If anything disagrees with the running
 > system, trust the system and update this file. The other authoritative
 > doc is `botella/spec.md` (current product spec). Core value:
 > *"we add value to the user."*
@@ -9,6 +9,34 @@
 ---
 
 ## 0. Where we are right now
+
+### Today's working state (2026-05-12)
+
+**Just shipped (commit `15a29c2` on `baraki123/Botella@main`):**
+- **Smart-snap scroll rule** in `useChatScroll.ts` (mobile-template + layla-app verbatim). Replaces always-scrollToEnd with Case A (fits → scrollToEnd) / Case B (overflows → anchor top one line below chrome). Verified Case B in the booted iPhone 16 Plus sim against the "Emotional Pattern" section reveal — the prior chip ("How you actually feel → 4/5") sits at the top as the one-line context anchor, then the new long bubble begins below it. Case A and the keyboard-rise re-snap path on the date prompt are not yet device-verified (next agent: run a fresh `/start` + describe_ui to confirm). Contract block at top of `useChatScroll.ts` is now the source of truth, including bulk-arrival bypass and "re-evaluate Case A/B on viewport shrink" notes.
+- **Spell-check on, autocorrect off** in `Composer.tsx` (both forks). Red squiggle helps with names/places; QuickType bar stays off so it doesn't clip the input.
+
+**iOS dev environment now in place (a fresh agent will inherit this):**
+- Xcode (16.x) installed at `/Applications/Xcode.app`. CLT version 15.3 is still the old standalone — brew compiles refuse against it (it wants Xcode 26.3-era CLT), so any brew formula that builds from source against Apple toolchains will currently fail. None of our shipping path needs that; only `idb-companion` did, and we dropped idb in favor of XcodeBuildMCP.
+- One iOS Simulator runtime (iOS 18.6, iPhone 16 Plus, UDID `8BDE87D3-2C7E-4927-A02D-4ED9C48B7110`) is the canonical sim. The 10 other devices Xcode pre-created (Pro / Pro Max / 16e / 16 / 5 iPads) have been deleted to save space — recreate with `xcrun simctl create` if needed.
+- **XcodeBuildMCP** is registered (`claude mcp add XcodeBuildMCP -- npx -y xcodebuildmcp@latest mcp`) and showing ✓ Connected in `claude mcp list`. The 97 tools (`describe_ui`, `screenshot`, `tap`, `type`, `swipe`, `build_run_sim`, `log_sim`, etc.) are not yet visible to the agent in this session — they register on next session start. **A fresh agent inheriting this state can drive Layla in the simulator hands-off**, no user taps required. See CLAUDE.md → "MCP — XcodeBuildMCP" for the driving pattern.
+- AppleScript can send keystrokes to the booted simulator when something is focused (Accessibility permission granted to the terminal app hosting Claude Code) but cannot enumerate or compute coords for iOS UI — that's a hard macOS limit (iOS surfaces are Metal-rendered, AX-opaque). XcodeBuildMCP exists specifically to work around this.
+
+**Live dev servers (kill before next session if you want a clean boot):**
+- Backend: `uvicorn bot_botella:app --port 8000` running from `~/Desktop/Coding/GombiStar` (bash task `by95x4c2l` in the previous session — may have been reaped).
+- Metro: `npx expo start --port 8081` from `layla-app/`. Layla is loaded into the iPhone 16 Plus Expo Go via deep-link `exp://127.0.0.1:8081`.
+
+**Disk:** ~9 GB free on the data volume after this session's cleanup pass (was at 100% / 126 MB free at session start). Freed: ~10 GB across `~/Downloads/*.dmg`, `~/Library/Caches/*`, brew downloads, and 10 unused simulator devices.
+
+**Open follow-ups for the next agent:**
+1. Restart the Claude Code session so XcodeBuildMCP's tools register. Then run a fresh `/start` in the booted sim using `describe_ui` + `tap` + `type` to verify smart-snap Case A (short prompt fully above keyboard) and the keyboard-rise re-snap on the date prompt specifically — these are the cases we did not get to device-verify before shipping.
+2. Add `accessibilityLabel` / `testID` to the Composer `TextInput`, Send/Mic buttons, Bubble container, doorway chips so XcodeBuildMCP doesn't have to guess at coords.
+3. If you want users to see smart-snap, cut an EAS Update (JS-only OTA) — the change is JS-only, no native rebuild needed. Locally it's already live in the dev sim and web build.
+
+---
+
+### Standing state (rest of §0 unchanged below)
+
 
 **The chat-first redesign (Map / Moment / Orbit) is LIVE in production.**
 Telegram (`@laylastarbot`) and the iOS/web app both speak to the same
@@ -1223,6 +1251,80 @@ ATS exemption) or use `expo start --tunnel` and override.
 cd ~/Desktop/Coding/botella && source venv/bin/activate && python -m pytest -q
 # 72 passing (incl. WS keepalive + account-link + apple-auth multi-aud)
 ```
+
+### Telegram MCP (drive `@laylastarbot` as a real user)
+
+A Telethon-backed MCP server lets the agent send messages, click inline
+buttons, and read replies from `@laylastarbot` as the test Telegram
+account. Use this when the user says "test on Telegram" or to verify
+behavior on the Telegram-linked path (the iOS/web path uses Playwright
+MCP — see `CLAUDE.md`).
+
+**Config lives in:** `~/Desktop/Coding/GombiStar/.mcp.json` (NOT this
+repo). Telegram MCP only loads from sessions started inside GombiStar.
+
+```jsonc
+// GombiStar/.mcp.json
+{
+  "mcpServers": {
+    "telegram-user": {
+      "type": "stdio",
+      "command": "/Users/barakben-ezer/Desktop/Coding/GombiStar/venv/bin/python",
+      "args": ["/Users/barakben-ezer/Desktop/Coding/GombiStar/mcp/telegram_user_mcp.py"],
+      "env": {
+        "TG_API_ID": "${TG_API_ID}",
+        "TG_API_HASH": "${TG_API_HASH}",
+        "TG_SESSION": "/Users/barakben-ezer/Desktop/Coding/GombiStar/mcp/tester.session"
+      }
+    }
+  }
+}
+```
+
+**Secrets** (`TG_API_ID`, `TG_API_HASH`) live in `GombiStar/.env`,
+issued from my.telegram.org under the user's own Telegram account. The
+MCP server auto-loads `.env` on boot (lines 24-30 of
+`mcp/telegram_user_mcp.py`). Never commit them — `.env` is gitignored.
+
+**Session file:** `GombiStar/mcp/tester.session` already exists and is
+authorised. As long as that file isn't deleted, the MCP boots ready
+to go. If you ever need to re-auth (lost session, new test account):
+
+```bash
+cd ~/Desktop/Coding/GombiStar && source venv/bin/activate
+python mcp/telegram_user_mcp.py --auth
+# enter test-account phone (+1...), then the 5-digit code Telegram
+# sends *in-app* (not SMS, since the number is already on Telegram)
+```
+
+**Tools exposed** (prefix `mcp__telegram-user__` in Claude Code):
+
+- `send_message(bot_username, text)` — send as test user. Use
+  `"@laylastarbot"` for prod.
+- `get_messages(bot_username, limit=10)` — read recent thread, oldest first.
+- `wait_for_reply(bot_username, timeout_seconds=30)` — poll until the
+  bot replies, then dump recent context. Use after `send_message`.
+- `click_button(bot_username, button_text)` — click an inline-keyboard
+  button by EXACT label (e.g. `"English"`, `"✅ נכון"`, doorway chips).
+- `clear_conversation(bot_username)` — delete up to 100 recent
+  messages. Use to start a clean test run.
+
+**Typical run:**
+
+```text
+1. clear_conversation("@laylastarbot")    # clean slate
+2. send_message("@laylastarbot", "/start")
+3. wait_for_reply("@laylastarbot", 30)
+4. click_button("@laylastarbot", "English")
+5. wait_for_reply, click_button, …        # walk onboarding
+6. send_message("@laylastarbot", "01/01/1990")
+…
+```
+
+**Gotcha:** the MCP needs to be launched from the GombiStar session
+because that's where `.mcp.json` is — if you're in the botella repo
+and tools are missing, the user needs to restart Claude Code from
+GombiStar (or symlink `.mcp.json`).
 
 ---
 
