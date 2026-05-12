@@ -78,6 +78,7 @@ export function Bubble({ message, onImagePress }: Props) {
   if (isUser) {
     return (
       <Animated.View
+        testID="bubble-user"
         style={[
           styles.row,
           styles.rowUser,
@@ -120,6 +121,7 @@ export function Bubble({ message, onImagePress }: Props) {
 
   return (
     <Animated.View
+      testID={message.streaming ? "bubble-bot-streaming" : "bubble-bot"}
       style={[styles.row, { opacity: fade, transform: [{ translateY: lift }] }]}
     >
       <View style={styles.botRow}>

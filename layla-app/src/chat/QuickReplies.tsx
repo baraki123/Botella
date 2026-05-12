@@ -101,11 +101,23 @@ function Chip({
     onPick(option.value, option.label);
   };
 
+  // testID is the wire value (or label fallback) so MCP can target a
+  // specific chip across re-renders — value tokens like `__doorway_situation`
+  // stay stable even when the localized label changes.
+  const stableId =
+    typeof option === "string"
+      ? option
+      : "value" in option
+      ? option.value
+      : option.url;
   return (
     <Animated.View
       style={{ opacity: fade, transform: [{ translateY: lift }] }}
     >
       <Pressable
+        testID={`chip-${stableId}`}
+        accessibilityRole="button"
+        accessibilityLabel={label}
         onPress={handlePress}
         style={({ pressed }) => [
           styles.chip,

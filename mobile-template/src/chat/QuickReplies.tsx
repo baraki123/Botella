@@ -15,6 +15,9 @@ export function QuickReplies({ options, onPick }: Props) {
       {options.map((opt) => (
         <Pressable
           key={opt}
+          testID={`chip-${opt}`}
+          accessibilityRole="button"
+          accessibilityLabel={opt}
           onPress={() => onPick(opt)}
           style={({ pressed }) => [
             styles.chip,

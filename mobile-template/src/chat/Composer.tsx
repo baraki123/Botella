@@ -106,6 +106,8 @@ export function Composer({
         >
           <TextInput
             style={styles.input}
+            testID="composer-input"
+            accessibilityLabel="composer input"
             value={recording ? "" : value}
             onChangeText={handleChangeText}
             onFocus={() => {
@@ -179,6 +181,7 @@ function SendButton({
 }) {
   return (
     <Pressable
+      testID="send-button"
       accessibilityRole="button"
       accessibilityLabel="send"
       onPress={onPress}
@@ -237,6 +240,7 @@ function MicButton({
 
   return (
     <Pressable
+      testID="mic-button"
       accessibilityRole="button"
       accessibilityLabel={recording ? "stop recording" : "record voice"}
       onPress={onPress}
