@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -40,6 +41,21 @@ import { KEYBOARD_VERTICAL_OFFSET_IOS, useChatScroll } from "./useChatScroll";
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+// AsyncStorage key for persisting chat history per anonymous/Apple user.
+// On full app reload, WS auto-resume only re-emits the CURRENT onboarding
+// state — prior bubbles (chart sigils, earlier sections, intro messages)
+// disappear. Persisting locally restores continuity; the WS resume layers
+// new state on top, and the server-side throttle (emit_first_map) already
+// suppresses re-emission of a section the client already has.
+//
+// Tied to user_id so signing into a different account doesn't pull the
+// previous one's history. Cleared explicitly on sign-out and delete-
+// account (see SettingsScreen).
+const CHAT_KEY_PREFIX = "layla:chat_messages:";
+export const CHAT_KEY_FOR = (userId: string) => `${CHAT_KEY_PREFIX}${userId}`;
+const CHAT_HISTORY_CAP = 60;
+const CHAT_PERSIST_DEBOUNCE_MS = 500;
 
 export interface ChatScreenProps {
   onOpenSettings?: () => void;
@@ -86,12 +102,75 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
     return null;
   }, [messages]);
 
+  // Detect the active language from message content so RTL-aware UI
+  // (composer placeholder, bubble dot side) can respond. We sniff the
+  // last 10 messages for Hebrew characters; tapping the עברית lang chip
+  // immediately produces a Hebrew user pill, so this catches as soon as
+  // the user picks. Server doesn't push `lang` to the client today, and
+  // adding a session-meta frame would be a wider change.
+  const lang = useMemo<"en" | "he">(() => {
+    const hebrewChars = /[֐-׿]/;
+    for (const m of messages.slice(-10)) {
+      if (hebrewChars.test(m.text || "")) return "he";
+    }
+    return "en";
+  }, [messages]);
+
   // 1. Bootstrap session.
   useEffect(() => {
     ensureSession()
       .then(setSession)
       .catch((e: Error) => setAuthError(e.message));
   }, []);
+
+  // 1b. Hydrate cached chat history for this user before the WS connects.
+  // The WS auto-resume only re-emits the *current* onboarding section,
+  // so prior bubbles vanish on a hard reload without this. We load up to
+  // CHAT_HISTORY_CAP messages; the smart-snap hook treats this as a bulk
+  // arrival and jumps to the bottom (no Case-A/B anchor).
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!session || hydratedRef.current) return;
+    AsyncStorage.getItem(CHAT_KEY_FOR(session.userId))
+      .then((raw) => {
+        hydratedRef.current = true;
+        if (!raw) return;
+        try {
+          const saved = JSON.parse(raw);
+          if (Array.isArray(saved) && saved.length > 0) {
+            // Strip any `streaming: true` flags before hydration —
+            // a bubble that was mid-stream when the user reloaded
+            // is now a static completed bubble.
+            const cleaned = saved.map((m: any) =>
+              m && m.streaming ? { ...m, streaming: false } : m,
+            );
+            setMessages(cleaned);
+          }
+        } catch {
+          // Corrupt cache — ignore.
+        }
+      })
+      .catch(() => {
+        hydratedRef.current = true;
+      });
+  }, [session]);
+
+  // 1c. Debounced persistence: save the tail of `messages` to AsyncStorage
+  // so a full reload can restore the conversation. We skip mid-stream
+  // bubbles (their text grows by the token; saving every keystroke would
+  // thrash AsyncStorage). Caller doesn't need to await — fire-and-forget.
+  useEffect(() => {
+    if (!session) return;
+    if (!hydratedRef.current) return; // don't overwrite cache before load
+    if (messages.length === 0) return;
+    const timer = setTimeout(() => {
+      const tail = messages
+        .slice(-CHAT_HISTORY_CAP)
+        .filter((m) => !m.streaming);
+      AsyncStorage.setItem(CHAT_KEY_FOR(session.userId), JSON.stringify(tail)).catch(() => {});
+    }, CHAT_PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [messages, session]);
 
   // 2. Open WS once session exists.
   useEffect(() => {
@@ -389,7 +468,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             renderItem={({ item }) => (
               // Quick-reply chips render in a sticky row above the
               // Composer (see below) so the keyboard never hides them.
-              <Bubble message={item} onImagePress={setLightboxUri} />
+              <Bubble message={item} onImagePress={setLightboxUri} lang={lang} />
             )}
             ListFooterComponent={showTyping ? <TypingIndicator /> : null}
             keyboardShouldPersistTaps="handled"
@@ -454,6 +533,7 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
           onToggleRecord={toggleRecord}
           recording={recording}
           transcribing={transcribing}
+          lang={lang}
           // Drop the home-indicator safe-area while keyboard is up —
           // the keyboard already covers that strip, so re-applying it
           // creates dead space above the keyboard. See useChatScroll

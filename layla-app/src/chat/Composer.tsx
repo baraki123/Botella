@@ -31,7 +31,27 @@ interface Props {
    * closed. KeyboardAvoidingView in the parent already handles the rise
    * when the keyboard appears. */
   bottomInset?: number;
+  /** Active language — drives placeholder + status-banner copy + RTL
+   * text alignment. Defaults to "en". */
+  lang?: "en" | "he";
 }
+
+const STRINGS = {
+  en: {
+    idle: "Tell Layla…",
+    recording: "Listening…",
+    transcribing: "Transcribing…",
+    reconnecting: "Reconnecting — keep typing, your messages will send.",
+    offline: "Offline. Your messages will send when we're back.",
+  },
+  he: {
+    idle: "ספרי לליילה…",
+    recording: "מקשיבה…",
+    transcribing: "מתמללת…",
+    reconnecting: "מתחברת מחדש — אפשר להמשיך להקליד, ההודעות יישלחו.",
+    offline: "במצב לא מקוון. ההודעות יישלחו כשנחזור.",
+  },
+} as const;
 
 // Auto-dismiss the keyboard after this many ms of typing inactivity
 // (no onChangeText fires for the duration). Re-armed on every keystroke.
@@ -49,7 +69,10 @@ export function Composer({
   recording,
   transcribing,
   bottomInset = 0,
+  lang = "en",
 }: Props) {
+  const t = STRINGS[lang] ?? STRINGS.en;
+  const isRTL = lang === "he";
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const ready = !!value.trim();
@@ -91,9 +114,7 @@ export function Composer({
         <View style={styles.statusBanner}>
           <View style={styles.statusBannerDot} />
           <Text style={styles.statusBannerText}>
-            {status === "connecting"
-              ? "Reconnecting — keep typing, your messages will send."
-              : "Offline. Your messages will send when we're back."}
+            {status === "connecting" ? t.reconnecting : t.offline}
           </Text>
         </View>
       ) : null}
@@ -105,7 +126,7 @@ export function Composer({
           ]}
         >
           <TextInput
-            style={styles.input}
+            style={[styles.input, isRTL && styles.inputRTL]}
             testID="composer-input"
             accessibilityLabel="composer input"
             value={recording ? "" : value}
@@ -122,11 +143,7 @@ export function Composer({
               clearIdleTimer();
             }}
             placeholder={
-              recording
-                ? "Listening…"
-                : transcribing
-                ? "Transcribing…"
-                : "Tell Layla…"
+              recording ? t.recording : transcribing ? t.transcribing : t.idle
             }
             placeholderTextColor={theme.textMuted}
             onSubmitEditing={submit}
@@ -351,6 +368,10 @@ const styles = StyleSheet.create({
     // RN-Web injects a browser focus ring on the underlying <textarea>;
     // suppress so our amber inputWrapFocused border is the only focus cue.
     ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : {}),
+  },
+  inputRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
   },
   sendShell: {
     width: 44,

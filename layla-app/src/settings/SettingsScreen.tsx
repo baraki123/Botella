@@ -42,6 +42,21 @@ import {
 const PRIVACY_URL = "https://layla.app/privacy"; // TODO: real URL before submission
 const TERMS_URL = "https://layla.app/terms";
 
+// Wipe per-user chat-history caches on sign-out and delete-account.
+// Keys are `layla:chat_messages:${userId}` (set by ChatScreen). We can't
+// know the previous user_id reliably from here (session may already be
+// cleared), so sweep all matching keys.
+async function clearCachedChatHistory(): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const stale = keys.filter((k) => k.startsWith("layla:chat_messages:"));
+    if (stale.length) await AsyncStorage.multiRemove(stale);
+  } catch {
+    // best-effort — a failure here just means the next user might
+    // briefly see the previous chat tail before their own restore.
+  }
+}
+
 export interface SettingsScreenProps {
   onSignedOut: () => void;
   onAccountSwitched?: () => void;
@@ -157,6 +172,7 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: Sett
     setBusy("signout");
     await clearSession();
     await AsyncStorage.removeItem("botella.authProvider");
+    await clearCachedChatHistory();
     setBusy(null);
     onSignedOut();
   }
@@ -205,6 +221,7 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: Sett
       }
       await clearSession();
       await AsyncStorage.removeItem("botella.authProvider");
+      await clearCachedChatHistory();
       onSignedOut();
     } catch (e: any) {
       // On web fall back to alert(); on native we can use Alert

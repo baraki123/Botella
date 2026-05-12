@@ -23,6 +23,9 @@ interface Props {
   /** Called when the user taps an inline image. Caller opens the
    * full-screen lightbox. */
   onImagePress?: (uri: string) => void;
+  /** Active language. In Hebrew, flip the bot row so the gold dot leads
+   * at the right edge. Defaults to "en". */
+  lang?: "en" | "he";
 }
 
 /**
@@ -37,8 +40,9 @@ interface Props {
  * gold dot blooms in slightly after Layla's text starts settling — small
  * timing detail that makes her presence feel composed rather than abrupt.
  */
-export function Bubble({ message, onImagePress }: Props) {
+export function Bubble({ message, onImagePress, lang = "en" }: Props) {
   const isUser = message.role === "user";
+  const isRTL = lang === "he";
   // Memoize per-bubble so streaming-token re-renders + chat-state
   // updates don't re-walk the regex chain on every paint of every row.
   const text = useMemo(() => stripHtml(message.text), [message.text]);
@@ -81,12 +85,12 @@ export function Bubble({ message, onImagePress }: Props) {
         testID="bubble-user"
         style={[
           styles.row,
-          styles.rowUser,
+          isRTL ? styles.rowUserRTL : styles.rowUser,
           { opacity: fade, transform: [{ translateY: lift }] },
         ]}
       >
-        <View style={styles.userBubble}>
-          <Text style={styles.userText}>
+        <View style={[styles.userBubble, isRTL && styles.userBubbleRTL]}>
+          <Text style={[styles.userText, isRTL && styles.textRTL]}>
             {text}
             {message.streaming ? <Text style={styles.caret}>▍</Text> : null}
           </Text>
@@ -124,7 +128,7 @@ export function Bubble({ message, onImagePress }: Props) {
       testID={message.streaming ? "bubble-bot-streaming" : "bubble-bot"}
       style={[styles.row, { opacity: fade, transform: [{ translateY: lift }] }]}
     >
-      <View style={styles.botRow}>
+      <View style={[styles.botRow, isRTL && styles.botRowRTL]}>
         <Animated.View
           style={[styles.botDot, { transform: [{ scale: dotScale }] }]}
         />
@@ -148,7 +152,7 @@ export function Bubble({ message, onImagePress }: Props) {
               // Streaming chat replies: keep plain Text + caret for the
               // tight token-tail UX. Markdown library can't easily append
               // a non-markdown caret element mid-render.
-              <Text style={styles.botText}>
+              <Text style={[styles.botText, isRTL && styles.textRTL]}>
                 {text}
                 <Text style={styles.caret}>▍</Text>
               </Text>
@@ -156,8 +160,17 @@ export function Bubble({ message, onImagePress }: Props) {
               // Completed bot message: render markdown so GPT's natural
               // headers (`### Sun in Pisces`), bold (`**term**`), and
               // bulleted lists become properly styled instead of showing
-              // raw syntax characters.
-              <Markdown style={markdownStyles}>{text}</Markdown>
+              // raw syntax characters. For Hebrew, overlay RTL alignment
+              // on the body style.
+              <Markdown
+                style={
+                  isRTL
+                    ? { ...markdownStyles, body: { ...markdownStyles.body, textAlign: "right", writingDirection: "rtl" } }
+                    : markdownStyles
+                }
+              >
+                {text}
+              </Markdown>
             )
           ) : null}
           {!message.streaming && text.length >= PLAY_BUTTON_MIN_CHARS ? (
@@ -266,6 +279,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
   },
+  // In Hebrew/RTL, the user pill anchors to the LEFT of the row.
+  rowUserRTL: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
+  },
+  userBubbleRTL: {
+    borderBottomRightRadius: theme.radius,
+    borderBottomLeftRadius: 6,
+  },
+  textRTL: {
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
   userBubble: {
     maxWidth: "80%",
     paddingVertical: 10,
@@ -294,6 +320,12 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 12,
     paddingRight: 28,
+  },
+  // Flip the gold dot to the right edge in Hebrew/RTL.
+  botRowRTL: {
+    flexDirection: "row-reverse",
+    paddingRight: 0,
+    paddingLeft: 28,
   },
   botDot: {
     width: 6,
