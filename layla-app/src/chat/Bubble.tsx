@@ -16,7 +16,9 @@ import type { Message } from "./types";
 
 // Long-form bot bubbles get a ▶ Listen affordance. Short replies don't —
 // the play button on a one-line "I'm with you" would be visual noise.
-const PLAY_BUTTON_MIN_CHARS = 220;
+// Exported so ChatScreen can use the same threshold when deciding which
+// new bubbles to prefetch TTS audio for.
+export const PLAY_BUTTON_MIN_CHARS = 220;
 
 interface Props {
   message: Message;

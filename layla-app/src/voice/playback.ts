@@ -194,6 +194,44 @@ async function _fetchAudioBlobUrl(
 }
 
 
+// In-flight prefetch keys. Stops a second prefetch call (e.g. from a
+// re-render) from queuing a duplicate request before the first lands.
+const _prefetchInFlight = new Set<string>();
+
+/**
+ * Fire-and-forget pre-fetch of the TTS audio for a given text. Warms the
+ * in-memory cache so a subsequent `togglePlay` is instant (no 15-25s
+ * synth wait on first tap). Idempotent: a second call with the same
+ * text+voice is a no-op while the first is in flight, or once cached.
+ *
+ * Gating happens at the caller (ChatScreen) — we only prefetch when:
+ *   - voice playback is enabled in Settings (cost),
+ *   - the bubble is long enough to render a Listen affordance (≥ 220 chars),
+ *   - the bubble has finished streaming.
+ *
+ * Errors are swallowed silently: if the prefetch fails, the user's
+ * eventual Listen tap falls back to the on-demand fetch + surfaces the
+ * error on the button.
+ */
+export async function prefetchAudio(opts: {
+  text: string;
+  voice?: string;
+  jwt: string;
+}): Promise<void> {
+  const voice = opts.voice ?? "shimmer";
+  const key = bubbleCacheKey(opts.text, voice);
+  if (_audioCache.has(key) || _prefetchInFlight.has(key)) return;
+  _prefetchInFlight.add(key);
+  try {
+    await _fetchAudioBlobUrl(opts.text, voice, opts.jwt);
+  } catch {
+    // Silent — see docstring. The fetch path in togglePlay will surface
+    // the error if the user actually taps Listen.
+  } finally {
+    _prefetchInFlight.delete(key);
+  }
+}
+
 /**
  * Play (or stop) the given text via Layla's voice.
  *

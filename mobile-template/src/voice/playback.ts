@@ -194,6 +194,33 @@ async function _fetchAudioBlobUrl(
 }
 
 
+// In-flight prefetch keys. Stops a second prefetch call (e.g. from a
+// re-render) from queuing a duplicate request before the first lands.
+const _prefetchInFlight = new Set<string>();
+
+/**
+ * Fire-and-forget pre-fetch of TTS audio so a later `togglePlay` is
+ * instant. Idempotent: a second call with the same text+voice is a
+ * no-op while one is in flight or already cached. Errors silent.
+ */
+export async function prefetchAudio(opts: {
+  text: string;
+  voice?: string;
+  jwt: string;
+}): Promise<void> {
+  const voice = opts.voice ?? "shimmer";
+  const key = bubbleCacheKey(opts.text, voice);
+  if (_audioCache.has(key) || _prefetchInFlight.has(key)) return;
+  _prefetchInFlight.add(key);
+  try {
+    await _fetchAudioBlobUrl(opts.text, voice, opts.jwt);
+  } catch {
+    // Silent — togglePlay's caller surfaces the error if the user taps.
+  } finally {
+    _prefetchInFlight.delete(key);
+  }
+}
+
 /**
  * Play (or stop) the given text via Layla's voice.
  *

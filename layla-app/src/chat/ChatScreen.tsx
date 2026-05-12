@@ -22,13 +22,14 @@ import type { BotEvent } from "../api/types";
 import { ensureSession, type Session } from "../auth/anonymous";
 import { product } from "../config/product";
 import { theme } from "../config/theme";
+import { getVoicePlaybackEnabled, prefetchAudio } from "../voice/playback";
 import {
   recorderAvailable,
   transcribe,
   useVoiceRecorder,
 } from "../voice/recorder";
 import { AdminBuildBanner } from "./AdminBuildBanner";
-import { Bubble } from "./Bubble";
+import { Bubble, PLAY_BUTTON_MIN_CHARS } from "./Bubble";
 import { Composer } from "./Composer";
 import { ImageLightbox } from "./ImageLightbox";
 import { QuickReplies } from "./QuickReplies";
@@ -170,6 +171,37 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       AsyncStorage.setItem(CHAT_KEY_FOR(session.userId), JSON.stringify(tail)).catch(() => {});
     }, CHAT_PERSIST_DEBOUNCE_MS);
     return () => clearTimeout(timer);
+  }, [messages, session]);
+
+  // 1d. TTS prefetch: when a new long bot bubble lands and voice playback
+  // is enabled, warm the cache so the Listen tap is instant (otherwise
+  // the first tap pays a 15-25s synth wait). Only the LATEST finished bot
+  // bubble that qualifies — we don't burn TTS budget on older bubbles the
+  // user has already scrolled past, and we don't prefetch while streaming
+  // (text is still growing). prefetchAudio is idempotent so a re-render
+  // doesn't fire a duplicate request.
+  const prefetchedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    // Find the latest qualifying bot bubble.
+    let target: Message | null = null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "bot") continue;
+      if (m.streaming) continue;
+      const len = (m.text || "").length;
+      if (len < PLAY_BUTTON_MIN_CHARS) continue;
+      target = m;
+      break;
+    }
+    if (!target) return;
+    if (prefetchedKeyRef.current === target.id) return;
+    prefetchedKeyRef.current = target.id;
+    (async () => {
+      const enabled = await getVoicePlaybackEnabled();
+      if (!enabled) return;
+      prefetchAudio({ text: target!.text, jwt: session.jwt }).catch(() => {});
+    })();
   }, [messages, session]);
 
   // 2. Open WS once session exists.
