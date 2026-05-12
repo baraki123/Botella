@@ -136,15 +136,24 @@ export function ChatScreen() {
         setShowTyping(false);
         const prompt = event.payload.prompt || "";
         const options = event.payload.options || [];
-        setMessages((m) => [
-          ...m,
-          {
-            id: uid(),
-            role: "bot",
-            text: prompt,
-            quickReplies: options,
-          },
-        ]);
+        setMessages((m) => {
+          // Empty-prompt chips attach to the previous bot bubble instead of
+          // creating their own message. A new `text: ""` bubble produces a
+          // ghost gold-dot row AND triggers a smart-snap re-anchor that
+          // can overshoot past a long bubble the chip belongs to.
+          if (!prompt && m.length > 0 && m[m.length - 1].role === "bot") {
+            const next = m.slice();
+            next[next.length - 1] = {
+              ...next[next.length - 1],
+              quickReplies: options,
+            };
+            return next;
+          }
+          return [
+            ...m,
+            { id: uid(), role: "bot", text: prompt, quickReplies: options },
+          ];
+        });
         return;
       }
 

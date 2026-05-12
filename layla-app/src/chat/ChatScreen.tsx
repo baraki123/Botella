@@ -195,15 +195,28 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
         setShowTyping(false);
         const prompt = event.payload.prompt || "";
         const options = event.payload.options || [];
-        setMessages((m) => [
-          ...m,
-          {
-            id: uid(),
-            role: "bot",
-            text: prompt,
-            quickReplies: options,
-          },
-        ]);
+        setMessages((m) => {
+          // Empty-prompt chips attach to the previous bot bubble instead of
+          // creating their own message. Two reasons:
+          // 1. A `text: ""` bubble renders as a ghost gold-dot row.
+          // 2. Smart-snap re-anchors to each new bubble's TOP; a 0-height
+          //    chip-row bubble is Case A → scrollToEnd, which overshoots
+          //    past the long section bubble the chip belongs to. Attaching
+          //    keeps the section bubble as the latest content for snap
+          //    purposes. latestChipMessage still resolves it.
+          if (!prompt && m.length > 0 && m[m.length - 1].role === "bot") {
+            const next = m.slice();
+            next[next.length - 1] = {
+              ...next[next.length - 1],
+              quickReplies: options,
+            };
+            return next;
+          }
+          return [
+            ...m,
+            { id: uid(), role: "bot", text: prompt, quickReplies: options },
+          ];
+        });
         return;
       }
 
