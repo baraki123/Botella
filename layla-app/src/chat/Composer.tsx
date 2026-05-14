@@ -2,6 +2,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  InputAccessoryView,
   Keyboard,
   Platform,
   Pressable,
@@ -10,6 +11,12 @@ import {
   TextInput,
   View,
 } from "react-native";
+
+// Single, app-wide nativeID for the 0-height accessory view that hides
+// iOS's QuickType bar without forcing autocomplete off. See the comment
+// near the TextInput for why this is needed instead of toggling
+// spellCheck.
+const QUICKTYPE_HIDE_ACCESSORY_ID = "composer-hide-quicktype";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
@@ -151,17 +158,21 @@ export function Composer({
             editable={!recording && !transcribing}
             blurOnSubmit={false}
             multiline
-            // Both OFF: spell-check ON kept the empty QuickType bar
-            // visible (two thin divider lines + ~50pt of vertical space)
-            // because iOS keeps the prediction infrastructure on for
-            // spell-check, even when autocorrect is off. On device, that
-            // empty strip butted right up against the composer's bottom
-            // edge. Dropping spell-check kills the bar entirely; we lose
-            // the red squiggle under misspelled names in exchange for a
-            // composer that sits cleanly above the keyboard.
+            // Spell-check ON (red squiggle on misspelled names),
+            // autocorrect OFF (no auto-replacement). On iOS, that combo
+            // would normally leave an EMPTY QuickType suggestion bar
+            // above the keyboard — the prediction infrastructure stays
+            // on for spell-check, so the bar's chrome renders even when
+            // it has nothing to show. We hide it by giving the
+            // TextInput an inputAccessoryViewID pointing at a 0-height
+            // accessory view (rendered below). iOS swaps QuickType out
+            // for the accessory; height 0 = strip disappears entirely.
             autoCorrect={false}
-            spellCheck={false}
+            spellCheck
             autoComplete="off"
+            inputAccessoryViewID={
+              Platform.OS === "ios" ? QUICKTYPE_HIDE_ACCESSORY_ID : undefined
+            }
             // Web: Enter sends, Shift+Enter newlines.
             onKeyPress={
               Platform.OS === "web"
@@ -186,6 +197,14 @@ export function Composer({
           <SendButton onPress={submit} ready={ready} />
         )}
       </View>
+      {/* iOS-only: empty accessory view that replaces the QuickType
+          suggestion bar with nothing. See the TextInput's
+          inputAccessoryViewID for why. Android ignores nativeID. */}
+      {Platform.OS === "ios" ? (
+        <InputAccessoryView nativeID={QUICKTYPE_HIDE_ACCESSORY_ID}>
+          <View style={{ height: 0 }} />
+        </InputAccessoryView>
+      ) : null}
     </View>
   );
 }
