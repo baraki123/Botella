@@ -6,6 +6,7 @@ import {
   Alert,
   Animated,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -205,6 +206,26 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
       prefetchAudio({ text: target!.text, jwt: session.jwt }).catch(() => {});
     })();
   }, [messages, session]);
+
+  // When a long bot bubble lands (first-map section, deep chat reply,
+  // etc.) the user needs the full screen to read. If the keyboard is
+  // still open from earlier composer focus, dismiss it. One-shot per
+  // qualifying bubble — keyed on message id so we don't fight the user
+  // who deliberately re-focuses the composer mid-read.
+  const dismissedForBubbleRef = useRef<string | null>(null);
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "bot") continue;
+      if (m.streaming) continue;
+      const len = (m.text || "").length;
+      if (len < PLAY_BUTTON_MIN_CHARS) continue;
+      if (dismissedForBubbleRef.current === m.id) return;
+      dismissedForBubbleRef.current = m.id;
+      Keyboard.dismiss();
+      return;
+    }
+  }, [messages]);
 
   // 2. Open WS once session exists.
   useEffect(() => {
@@ -543,7 +564,17 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
             maxToRenderPerBatch={30}
             removeClippedSubviews={false}
           />
-          <JumpToLatest opacity={pillOpacity} onPress={jumpToLatest} />
+          {/* "↓ Latest" pill hidden per product call — the smart-snap
+              rule keeps new content visible, so the pill rarely earned
+              its weight in practice and added noise. Keeping the
+              JumpToLatest component, the pillOpacity animation, and
+              the useChatScroll wiring intact so other botella products
+              (or a future re-add here) can opt back in by restoring
+              this line. See useChatScroll contract rule 3 for the
+              pill's intended semantics. */}
+          {false ? (
+            <JumpToLatest opacity={pillOpacity} onPress={jumpToLatest} />
+          ) : null}
         </View>
 
         {/* Sticky quick-reply row — sits between the message list and the

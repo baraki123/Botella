@@ -20,6 +20,18 @@ import type { Message } from "./types";
 // which new bubbles to prefetch TTS audio for.
 export const PLAY_BUTTON_MIN_CHARS = 220;
 
+// Suppress Listen on chart-sigil header bubbles (the "your chart's
+// ready" + planet/sign list emitted right after onboarding). They
+// cross 220 chars from sign names alone, but TTS reads the Unicode
+// glyphs awkwardly ("sun symbol moon symbol…"). Detect by either the
+// literal phrase or 2+ astrology symbols in the text.
+const ASTRO_SIGILS = /[☀☾↑☿♀♂♃♄♅♆♇⚷]/g;
+function isChartSigilBubble(text: string): boolean {
+  if (/your chart['']?s ready|המפה שלך מוכנה/i.test(text)) return true;
+  const sigilCount = (text.match(ASTRO_SIGILS) || []).length;
+  return sigilCount >= 2;
+}
+
 interface Props {
   message: Message;
   /** Called when the user taps an inline image. Caller opens the
@@ -175,7 +187,9 @@ export function Bubble({ message, onImagePress, lang = "en" }: Props) {
               </Markdown>
             )
           ) : null}
-          {!message.streaming && text.length >= PLAY_BUTTON_MIN_CHARS ? (
+          {!message.streaming
+            && text.length >= PLAY_BUTTON_MIN_CHARS
+            && !isChartSigilBubble(text) ? (
             <PlayButton text={text} />
           ) : null}
         </View>

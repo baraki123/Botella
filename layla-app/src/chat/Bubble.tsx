@@ -20,6 +20,20 @@ import type { Message } from "./types";
 // new bubbles to prefetch TTS audio for.
 export const PLAY_BUTTON_MIN_CHARS = 220;
 
+// The chart-sigil bubble emitted right after onboarding ("Avi — your
+// chart's ready. ☀ Aries Sun · ☾ Leo Moon · …") crosses the 220-char
+// threshold from sign names alone, so the Listen pill rendered on it.
+// But a planet/sign list is not something you want spoken aloud — TTS
+// reads "sun symbol" / "moon symbol" / one Unicode glyph at a time.
+// Detect: contains "your chart's ready" OR 2+ astrology sigils, and
+// suppress the pill.
+const ASTRO_SIGILS = /[☀☾↑☿♀♂♃♄♅♆♇⚷]/g;
+function isChartSigilBubble(text: string): boolean {
+  if (/your chart['']?s ready|המפה שלך מוכנה/i.test(text)) return true;
+  const sigilCount = (text.match(ASTRO_SIGILS) || []).length;
+  return sigilCount >= 2;
+}
+
 interface Props {
   message: Message;
   /** Called when the user taps an inline image. Caller opens the
@@ -178,7 +192,9 @@ export function Bubble({ message, onImagePress, lang = "en" }: Props) {
               </Markdown>
             )
           ) : null}
-          {!message.streaming && text.length >= PLAY_BUTTON_MIN_CHARS ? (
+          {!message.streaming
+            && text.length >= PLAY_BUTTON_MIN_CHARS
+            && !isChartSigilBubble(text) ? (
             <PlayButton text={text} />
           ) : null}
         </View>
