@@ -313,9 +313,27 @@ export function useChatScroll<T extends MinimalMessage>(
       if (isBulkArrivalRef.current) {
         isBulkArrivalRef.current = false;
         listRef.current?.scrollToEnd({ animated: false });
+        // Re-fire after a frame in case the first call hit a stale
+        // viewport (iOS UIScrollView layout settles async).
+        requestAnimationFrame(() =>
+          listRef.current?.scrollToEnd({ animated: false }),
+        );
         return;
       }
       snapToLatest(true);
+      // Defensive re-fire: on iOS, the FlatList sometimes reports
+      // contentHeight before its child views have finished measuring
+      // (especially during token streaming and inside a
+      // KeyboardAvoidingView resize). Re-running snapToLatest one
+      // frame later catches the case where the first scroll landed
+      // short of the actual final content edge — so a reply that
+      // FITS still appears in full, and a reply that OVERFLOWS still
+      // anchors cleanly to its top + 1 line.
+      requestAnimationFrame(() => {
+        if (!userOverrideRef.current && isAtBottomRef.current) {
+          snapToLatest(false);
+        }
+      });
     },
     [snapToLatest],
   );
