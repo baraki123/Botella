@@ -151,15 +151,16 @@ export function Composer({
             editable={!recording && !transcribing}
             blurOnSubmit={false}
             multiline
-            // Spell-check ON (red squiggle under misspellings) — users
-            // typing names of people / cities / events benefit from a
-            // catch on typos. Autocorrect stays OFF: iOS's QuickType
-            // suggestion bar above the keyboard steals ~50px of vertical
-            // space (which can clip the bottom of the input) and the
-            // "I | The | I'm" word-suggest noise is off-brand for the
-            // advisor voice. So: keep the underline, drop the bar.
+            // Both OFF: spell-check ON kept the empty QuickType bar
+            // visible (two thin divider lines + ~50pt of vertical space)
+            // because iOS keeps the prediction infrastructure on for
+            // spell-check, even when autocorrect is off. On device, that
+            // empty strip butted right up against the composer's bottom
+            // edge. Dropping spell-check kills the bar entirely; we lose
+            // the red squiggle under misspelled names in exchange for a
+            // composer that sits cleanly above the keyboard.
             autoCorrect={false}
-            spellCheck
+            spellCheck={false}
             autoComplete="off"
             // Web: Enter sends, Shift+Enter newlines.
             onKeyPress={

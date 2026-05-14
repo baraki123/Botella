@@ -104,14 +104,16 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
   }, [messages]);
 
   // Detect the active language from message content so RTL-aware UI
-  // (composer placeholder, bubble dot side) can respond. We sniff the
-  // last 10 messages for Hebrew characters; tapping the עברית lang chip
-  // immediately produces a Hebrew user pill, so this catches as soon as
-  // the user picks. Server doesn't push `lang` to the client today, and
-  // adding a session-meta frame would be a wider change.
+  // (composer placeholder, bubble dot side) can respond. Sniff only
+  // USER messages — bot messages can contain Hebrew incidentally (the
+  // very first opener is bilingual "Choose your language / בחר שפה:"
+  // and would flip a brand-new English user into RTL + Hebrew
+  // placeholder before they've tapped a chip). Tapping the עברית chip
+  // produces a Hebrew user pill, which catches as soon as the user picks.
   const lang = useMemo<"en" | "he">(() => {
     const hebrewChars = /[֐-׿]/;
     for (const m of messages.slice(-10)) {
+      if (m.role !== "user") continue;
       if (hebrewChars.test(m.text || "")) return "he";
     }
     return "en";
