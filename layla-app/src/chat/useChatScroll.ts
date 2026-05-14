@@ -173,7 +173,7 @@ const ONE_LINE_PX = 24;
  * If you find a screen that needs a different value, you have a layout
  * bug, not a knob — surface it here.
  */
-export const KEYBOARD_VERTICAL_OFFSET_IOS = 44;
+export const KEYBOARD_VERTICAL_OFFSET_IOS = 50;
 
 /**
  * Time the soft keyboard stays open without user input before
