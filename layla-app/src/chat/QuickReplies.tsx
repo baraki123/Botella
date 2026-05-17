@@ -59,6 +59,10 @@ export function QuickReplies({ options, onPick }: Props) {
               : "value" in p.opt
               ? p.opt.value
               : p.opt.label;
+          const primary =
+            typeof p.opt !== "string" &&
+            "value" in p.opt &&
+            p.opt.primary === true;
           return (
             <View
               key={chipKey(p.opt, i)}
@@ -69,6 +73,7 @@ export function QuickReplies({ options, onPick }: Props) {
                 label={label}
                 index={i}
                 stretch={allDoorway}
+                primary={primary}
                 onPress={() => onPick(wireValue, label)}
               />
             </View>

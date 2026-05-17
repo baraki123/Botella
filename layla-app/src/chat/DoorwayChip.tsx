@@ -74,11 +74,24 @@ interface Props {
    *  the 2-col grid). When false, the chip hugs its content (used when
    *  doorway chips are mixed with other chips in a flex-wrap row). */
   stretch?: boolean;
+  /** When true, the chip renders as the filled-gold lean-forward CTA:
+   *  gold pill with dark text and a reversed coin (dark medallion with
+   *  gold glyph). The backend marks exactly one chip per row as
+   *  primary per turn. */
+  primary?: boolean;
   /** testID stem; we'll append the token for stability across re-renders. */
   testID?: string;
 }
 
-export function DoorwayChip({ token, label, index, onPress, stretch, testID }: Props) {
+export function DoorwayChip({
+  token,
+  label,
+  index,
+  onPress,
+  stretch,
+  primary,
+  testID,
+}: Props) {
   const reduced = useReducedMotion();
   const fade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   const lift = useRef(new Animated.Value(reduced ? 0 : 8)).current;
@@ -120,16 +133,23 @@ export function DoorwayChip({ token, label, index, onPress, stretch, testID }: P
         onPress={onPress}
         style={({ pressed }) => [
           styles.chip,
+          primary && styles.chipPrimary,
           stretch && styles.chipStretch,
-          pressed && styles.chipPressed,
+          pressed && (primary ? styles.chipPrimaryPressed : styles.chipPressed),
         ]}
       >
         {({ pressed }) => (
           <>
-            <Coin pressed={pressed}>
-              <GlyphComp size={20} color={theme.doorCoinGlyph} />
+            <Coin pressed={pressed} primary={primary}>
+              <GlyphComp
+                size={20}
+                color={primary ? theme.doorCoinHi : theme.doorCoinGlyph}
+              />
             </Coin>
-            <Text style={styles.label} numberOfLines={1}>
+            <Text
+              style={[styles.label, primary && styles.labelPrimary]}
+              numberOfLines={1}
+            >
               {label}
             </Text>
           </>
@@ -139,21 +159,33 @@ export function DoorwayChip({ token, label, index, onPress, stretch, testID }: P
   );
 }
 
-/** The gold disc. Radial gradient via react-native-svg so iOS and web
- *  render the same way (RN's StyleSheet doesn't support radial gradients
+/** The disc. Radial gradient via react-native-svg so iOS and web render
+ *  the same way (RN's StyleSheet doesn't support radial gradients
  *  cross-platform). The hairline inner ring under the rim gives the
- *  disc its "minted" feel. */
+ *  disc its "minted" feel.
+ *
+ *  Default → gold disc (gold gradient) with dark glyph.
+ *  Primary → reversed: dark mauve disc with the glyph in gold. Reads as
+ *  a black seal pressed into a gold pill. */
 function Coin({
   pressed,
+  primary,
   children,
 }: {
   pressed: boolean;
+  primary?: boolean;
   children: React.ReactNode;
 }) {
+  // SVG gradient stops differ by variant. iOS reads stopColor as a
+  // string and ignores opacity unless we explicitly set it.
+  const [hi, mid, lo] = primary
+    ? ["#4a2236", "#2a1422", "#160910"]
+    : [theme.doorCoinHi, theme.doorCoinMid, theme.doorCoinLo];
   return (
     <View
       style={[
         styles.coin,
+        primary && styles.coinPrimary,
         pressed && styles.coinPressed,
       ]}
     >
@@ -164,18 +196,23 @@ function Coin({
         style={StyleSheet.absoluteFill}
       >
         <Defs>
-          <RadialGradient id="coinFill" cx="32%" cy="28%" r="78%">
-            <Stop offset="0%" stopColor={theme.doorCoinHi} stopOpacity={1} />
-            <Stop offset="55%" stopColor={theme.doorCoinMid} stopOpacity={1} />
-            <Stop offset="100%" stopColor={theme.doorCoinLo} stopOpacity={1} />
+          <RadialGradient id={primary ? "coinFillP" : "coinFill"} cx="32%" cy="28%" r="78%">
+            <Stop offset="0%" stopColor={hi} stopOpacity={1} />
+            <Stop offset="55%" stopColor={mid} stopOpacity={1} />
+            <Stop offset="100%" stopColor={lo} stopOpacity={1} />
           </RadialGradient>
         </Defs>
-        <Circle cx={19} cy={19} r={18.5} fill="url(#coinFill)" />
+        <Circle
+          cx={19}
+          cy={19}
+          r={18.5}
+          fill={`url(#${primary ? "coinFillP" : "coinFill"})`}
+        />
         <Circle
           cx={19}
           cy={19}
           r={17}
-          stroke="rgba(0,0,0,0.18)"
+          stroke={primary ? "rgba(234,208,142,0.35)" : "rgba(0,0,0,0.18)"}
           strokeWidth={0.6}
           fill="none"
         />
@@ -220,6 +257,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.42,
     shadowRadius: 12,
   },
+  // Primary variant — one chip per row, marked by the brain with
+  // `primary: true`. Filled gold pill, dark text, reversed coin.
+  chipPrimary: {
+    backgroundColor: theme.doorPrimaryFillLo,
+    borderColor: "rgba(255,245,200,0.45)",
+    shadowColor: theme.accent,
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: Platform.OS === "android" ? 4 : 0,
+  },
+  chipPrimaryPressed: {
+    backgroundColor: theme.doorPrimaryFillHi,
+    shadowOpacity: 0.6,
+    shadowRadius: 18,
+  },
   coin: {
     width: COIN,
     height: COIN,
@@ -236,6 +289,11 @@ const styles = StyleSheet.create({
   coinPressed: {
     transform: [{ scale: 0.96 }],
   },
+  coinPrimary: {
+    // The reversed coin sits inside a gold pill, so its halo doesn't
+    // need to fight a dark background — soften the drop shadow.
+    shadowOpacity: 0.3,
+  },
   coinGlyphWrap: {
     // Stack the glyph above the SVG fill. zIndex matters on web; on
     // native, draw-order suffices, but it's harmless to be explicit.
@@ -250,5 +308,8 @@ const styles = StyleSheet.create({
     // Cochin sits slightly low on the baseline — nudge up so it
     // optically centers with the coin.
     paddingBottom: Platform.OS === "ios" ? 1 : 0,
+  },
+  labelPrimary: {
+    color: theme.doorPrimaryText,
   },
 });

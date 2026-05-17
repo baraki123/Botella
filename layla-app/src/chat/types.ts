@@ -2,11 +2,14 @@ export type Role = "user" | "bot";
 
 /** A quick-reply option. Plain string → tapping sends that string back as
  *  a user message. Dict-form options support URL launching (share links)
- *  and label/value separation. */
+ *  and label/value separation. The optional `primary` flag on the value
+ *  form marks ONE chip per row as the lean-forward CTA — the iOS
+ *  doorway-chip renderer treats it as filled gold; non-doorway chips
+ *  and Telegram ignore it. */
 export type QuickReplyOption =
   | string
   | { label: string; url: string }
-  | { label: string; value: string };
+  | { label: string; value: string; primary?: boolean };
 
 export interface Message {
   id: string;
