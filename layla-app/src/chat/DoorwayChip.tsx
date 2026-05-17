@@ -300,15 +300,21 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   label: {
-    color: theme.doorChipLabel,
+    // Back to the brand gold (theme.chipText / theme.accent). The
+    // gold-coin medallion now carries the brightness; the label
+    // returns to the warm-gold brand voice. Size bumped to 18.5 so
+    // the chips are unmissable on a 40+ reader's first scan.
+    color: theme.chipText,
     fontFamily: theme.fontSerif,
-    fontSize: 17,
+    fontSize: 18.5,
     fontWeight: "700" as const,
     letterSpacing: 0.1,
     // Cochin sits slightly low on the baseline — nudge up so it
     // optically centers with the coin.
     paddingBottom: Platform.OS === "ios" ? 1 : 0,
   },
+  // Primary (filled-gold) chip keeps DARK text on purpose — gold-on-gold
+  // is unreadable. The primary remains the exception that proves the rule.
   labelPrimary: {
     color: theme.doorPrimaryText,
   },

@@ -246,9 +246,13 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   chipText: {
-    color: theme.doorChipLabel,
+    // Back to the brand gold (theme.chipText). Cream-on-mauve read as
+    // "system label" — the user prefers the warm gold voice on the
+    // generic chips, with the doorway chips still doing the heavy lift
+    // via the coin medallion rather than via label color.
+    color: theme.chipText,
     fontFamily: theme.fontSerif,
-    fontSize: 15.5,
+    fontSize: 17,
     fontWeight: "600" as const,
     letterSpacing: 0.1,
   },
