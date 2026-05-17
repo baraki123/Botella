@@ -214,36 +214,43 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
+    // Generic value + string chips inherit the same legibility pass as
+    // the doorway chips (cream serif label, hairline gold rim, warmer
+    // fill) but WITHOUT the gold-coin medallion — the coin stays
+    // exclusive to doorway moments so they keep their hierarchy.
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
-    paddingVertical: 9,
+    paddingVertical: 11,
     paddingHorizontal: 16,
     borderRadius: 999,
-    backgroundColor: theme.chip,
+    backgroundColor: theme.doorChipFillBot,
     borderWidth: 1,
-    borderColor: theme.chipBorder,
+    borderColor: theme.doorChipRim,
   },
   chipUrl: {
-    // URL options get a slightly warmer background so they read as
-    // "this leaves the app" without losing the chip family resemblance.
+    // URL options stay slightly quieter on purpose — they navigate AWAY
+    // (share to WhatsApp/Telegram) so they shouldn't compete with
+    // in-app CTAs. Cream text + external-arrow glyph still tell the
+    // story; the dimmer rim keeps them subordinate.
     backgroundColor: theme.surfaceRaised,
     borderColor: theme.accentDim,
   },
   chipPressed: {
-    backgroundColor: theme.surfaceRaised,
-    borderColor: theme.accent,
+    backgroundColor: theme.doorChipFillTop,
+    borderColor: theme.doorChipRimHi,
     shadowColor: theme.accent,
     shadowOpacity: 0.4,
-    shadowRadius: 6,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 0 },
     elevation: 2,
   },
   chipText: {
-    color: theme.chipText,
-    fontSize: 14,
-    fontWeight: "500" as const,
-    letterSpacing: 0.3,
+    color: theme.doorChipLabel,
+    fontFamily: theme.fontSerif,
+    fontSize: 15.5,
+    fontWeight: "600" as const,
+    letterSpacing: 0.1,
   },
   arrowWrap: { width: 11, height: 11 },
   // 2 × 2 grid layout — engaged only when the entire row is doorway
