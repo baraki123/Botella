@@ -6,11 +6,12 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { ChatScreen } from "./src/chat/ChatScreen";
 import { loadCachedSession, type Session } from "./src/auth/anonymous";
 import { SignInScreen } from "./src/auth/SignInScreen";
+import { PeopleScreen } from "./src/people/PeopleScreen";
 import { SettingsScreen } from "./src/settings/SettingsScreen";
 import { theme } from "./src/config/theme";
 import { registerForPushNotifications } from "./src/push/registerPush";
 
-type Route = "signin" | "chat" | "settings";
+type Route = "signin" | "chat" | "settings" | "people";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -66,11 +67,22 @@ export default function App() {
   } else {
     body = (
       <View style={styles.fill}>
-        <ChatScreen onOpenSettings={() => setRoute("settings")} />
+        <ChatScreen
+          onOpenSettings={() => setRoute("settings")}
+          onOpenPeople={() => setRoute("people")}
+        />
         {route === "settings" ? (
           <View style={StyleSheet.absoluteFillObject}>
             <SettingsScreen
               onSignedOut={handleSignedOut}
+              onClose={() => setRoute("chat")}
+            />
+          </View>
+        ) : null}
+        {route === "people" ? (
+          <View style={StyleSheet.absoluteFillObject}>
+            <PeopleScreen
+              jwt={session.jwt}
               onClose={() => setRoute("chat")}
             />
           </View>

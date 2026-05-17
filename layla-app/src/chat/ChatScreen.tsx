@@ -61,9 +61,10 @@ const CHAT_PERSIST_DEBOUNCE_MS = 500;
 
 export interface ChatScreenProps {
   onOpenSettings?: () => void;
+  onOpenPeople?: () => void;
 }
 
-export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
+export function ChatScreen({ onOpenSettings, onOpenPeople }: ChatScreenProps = {}) {
   const [session, setSession] = useState<Session | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
@@ -511,7 +512,11 @@ export function ChatScreen({ onOpenSettings }: ChatScreenProps = {}) {
           Platform.OS === "ios" ? KEYBOARD_VERTICAL_OFFSET_IOS : 0
         }
       >
-        <ChatHeader status={status} onOpenSettings={onOpenSettings} />
+        <ChatHeader
+          status={status}
+          onOpenSettings={onOpenSettings}
+          onOpenPeople={onOpenPeople}
+        />
 
         <View style={styles.listWrap}>
           <FlatList
@@ -655,9 +660,11 @@ function JumpToLatest({
 function ChatHeader({
   status,
   onOpenSettings,
+  onOpenPeople,
 }: {
   status: "open" | "connecting" | "closed";
   onOpenSettings?: () => void;
+  onOpenPeople?: () => void;
 }) {
   const dotColor = useMemo(() => {
     if (status === "open") return theme.statusOpen;
@@ -680,19 +687,36 @@ function ChatHeader({
           />
           <Text style={styles.headerTitle}>{product.name}</Text>
         </View>
-        {onOpenSettings ? (
-          <Pressable
-            onPress={onOpenSettings}
-            style={({ pressed }) => [
-              styles.settingsBtn,
-              pressed && { opacity: 0.5 },
-            ]}
-            accessibilityLabel="Settings"
-            hitSlop={10}
-          >
-            <Text style={styles.settingsIcon}>⋯</Text>
-          </Pressable>
-        ) : null}
+        <View style={styles.headerRight}>
+          {onOpenPeople ? (
+            <Pressable
+              onPress={onOpenPeople}
+              style={({ pressed }) => [
+                styles.settingsBtn,
+                pressed && { opacity: 0.5 },
+              ]}
+              accessibilityLabel="People in your Orbit"
+              accessibilityRole="button"
+              hitSlop={10}
+              testID="header-people-button"
+            >
+              <Text style={styles.peopleIcon}>✦</Text>
+            </Pressable>
+          ) : null}
+          {onOpenSettings ? (
+            <Pressable
+              onPress={onOpenSettings}
+              style={({ pressed }) => [
+                styles.settingsBtn,
+                pressed && { opacity: 0.5 },
+              ]}
+              accessibilityLabel="Settings"
+              hitSlop={10}
+            >
+              <Text style={styles.settingsIcon}>⋯</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
       {/* Soft gold hairline gradient under the header — fades in from
           edges, peaks in the middle. Replaces the flat 1px border with
@@ -734,6 +758,7 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
   headerTitle: {
     fontSize: 24,
     color: theme.text,
@@ -751,6 +776,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   settingsIcon: { fontSize: 24, color: theme.textSubtle, lineHeight: 24 },
+  peopleIcon: { fontSize: 19, color: theme.accent, lineHeight: 24 },
   statusDot: {
     width: 8,
     height: 8,
