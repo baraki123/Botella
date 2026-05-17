@@ -49,6 +49,27 @@ export const theme = {
   chipBorder: "#3D2F44",
   chipText: "#D4A574",
 
+  // Doorway chips (post-map-read pivots). A gold "coin" medallion on the
+  // leading edge of each chip carries the brand glyph; the pill stays
+  // dark + refined so the brand mood survives, while the coin gives the
+  // eye a high-contrast focal point per CTA.
+  //   tag (the pill)
+  doorChipFillTop:   "#2c1822",
+  doorChipFillBot:   "#1a0e15",
+  doorChipRim:       "rgba(201,168,106,0.30)",
+  doorChipRimHi:     "rgba(234,208,142,0.60)",  // pressed/hover rim
+  doorChipLabel:     "#f3e5be",                 // cream — NOT gold
+  //   coin (the medallion)
+  doorCoinHi:        "#ead08e",                 // top of radial gradient
+  doorCoinMid:       "#c9a86a",                 // middle
+  doorCoinLo:        "#a8895a",                 // bottom — gives depth
+  doorCoinGlyph:     "#1a0d16",                 // dark knockout inside the coin
+  //   primary variant — staged for v2 (one chip per turn rendered as a
+  //   filled gold pill that visually leads). Not used in v1.
+  doorPrimaryFillHi: "#ead08e",
+  doorPrimaryFillLo: "#c9a86a",
+  doorPrimaryText:   "#1a0d16",
+
   // Status (header dot)
   statusOpen: "#D4A574",    // gold "I'm here"
   statusConnecting: "#A99B95",

@@ -4,6 +4,12 @@ import Svg, { Path } from "react-native-svg";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
+import {
+  DoorwayChip,
+  isKnownDoorwayToken,
+  stripLeadingEmoji,
+  type DoorwayToken,
+} from "./DoorwayChip";
 import type { QuickReplyOption } from "./types";
 
 interface Props {
@@ -27,13 +33,60 @@ interface Props {
  */
 export function QuickReplies({ options, onPick }: Props) {
   if (!options.length) return null;
+
+  // Separate doorway chips (rendered as gold coins on a 2-col grid) from
+  // everything else (URL chips, value chips, plain-string chips —
+  // unchanged "Chip" render). When the row is doorway-only and ≥2 chips
+  // long, lay them out 2 × 2; otherwise fall back to the flex-wrap row
+  // that's served the app since v1.
+  const partitioned = options.map((opt) => {
+    const token = doorwayTokenOf(opt);
+    return token ? { kind: "doorway" as const, opt, token } : { kind: "chip" as const, opt };
+  });
+  const doorwayCount = partitioned.filter((p) => p.kind === "doorway").length;
+  const allDoorway = doorwayCount === options.length && doorwayCount >= 2;
+
   return (
-    <View style={styles.row}>
-      {options.map((opt, i) => (
-        <Chip key={chipKey(opt, i)} option={opt} onPick={onPick} index={i} />
-      ))}
+    <View style={[styles.row, allDoorway && styles.rowGrid]}>
+      {partitioned.map((p, i) => {
+        if (p.kind === "doorway") {
+          const label = stripLeadingEmoji(
+            typeof p.opt === "string" ? p.opt : p.opt.label,
+          );
+          const wireValue =
+            typeof p.opt === "string"
+              ? p.opt
+              : "value" in p.opt
+              ? p.opt.value
+              : p.opt.label;
+          return (
+            <View
+              key={chipKey(p.opt, i)}
+              style={allDoorway ? styles.gridCell : undefined}
+            >
+              <DoorwayChip
+                token={p.token}
+                label={label}
+                index={i}
+                stretch={allDoorway}
+                onPress={() => onPick(wireValue, label)}
+              />
+            </View>
+          );
+        }
+        return <Chip key={chipKey(p.opt, i)} option={p.opt} onPick={onPick} index={i} />;
+      })}
     </View>
   );
+}
+
+/** Returns the doorway token if `opt` is a known doorway value-chip,
+ *  otherwise null. Centralised so QuickReplies and Chip both detect
+ *  doorways the same way. */
+function doorwayTokenOf(opt: QuickReplyOption): DoorwayToken | null {
+  if (typeof opt === "string") return null;
+  if (!("value" in opt)) return null;
+  return isKnownDoorwayToken(opt.value) ? opt.value : null;
 }
 
 function chipKey(opt: QuickReplyOption, i: number): string {
@@ -78,14 +131,10 @@ function Chip({
   const isUrl = typeof option !== "string" && "url" in option;
   const label =
     typeof option === "string" ? option : option.label;
-  // Doorway chips (post-map-read pivot) get a more contemplative
-  // styling — softer glow, serif label, larger touch target. Recognised
-  // by the stable `__doorway_*` value tokens emitted by the server.
-  const isDoorway =
-    typeof option !== "string" &&
-    "value" in option &&
-    typeof option.value === "string" &&
-    option.value.startsWith("__doorway_");
+  // NOTE: known `__doorway_*` value chips are handled by `DoorwayChip`
+  // via the parent. Unknown doorway tokens (or any future value chip)
+  // still fall through here so they render as the generic chip rather
+  // than disappear.
 
   const handlePress = () => {
     if (typeof option === "string") {
@@ -122,14 +171,10 @@ function Chip({
         style={({ pressed }) => [
           styles.chip,
           isUrl && styles.chipUrl,
-          isDoorway && styles.chipDoorway,
           pressed && styles.chipPressed,
-          pressed && isDoorway && styles.chipDoorwayPressed,
         ]}
       >
-        <Text style={[styles.chipText, isDoorway && styles.chipDoorwayText]}>
-          {label}
-        </Text>
+        <Text style={styles.chipText}>{label}</Text>
         {isUrl ? <ExternalArrow /> : null}
       </Pressable>
     </Animated.View>
@@ -195,27 +240,19 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
     letterSpacing: 0.3,
   },
-  // Doorway chips — slightly distinct from chat-flow chips (serif label,
-  // soft gold halo) but the SAME size. The previous version was too
-  // tall/wide and ate half the screen; now it just reads with the
-  // ceremony of the typography, not the bulk of the chrome.
-  chipDoorway: {
-    backgroundColor: theme.surfaceRaised,
-    borderColor: theme.accentDim,
-    shadowColor: theme.accent,
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  chipDoorwayPressed: {
-    shadowOpacity: 0.45,
-    shadowRadius: 8,
-  },
-  chipDoorwayText: {
-    fontFamily: theme.fontSerif,
-    fontSize: 14,
-    fontWeight: "500" as const,
-    letterSpacing: 0.35,
-  },
   arrowWrap: { width: 11, height: 11 },
+  // 2 × 2 grid layout — engaged only when the entire row is doorway
+  // chips. Each cell takes half the available width minus the gap so
+  // the chips align on a clean line.
+  rowGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  gridCell: {
+    width: "50%",
+    // The chip itself is full-width within the cell; the half-gap on
+    // each side gives us the 8px gutter between columns.
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
 });

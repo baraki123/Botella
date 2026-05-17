@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Layla — Doorway Chips · Coin & Tag</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..600&family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --canvas-0: #0e070b;
+    --canvas-1: #14090e;
+    --canvas-2: #1a0f17;
+    --canvas-3: #221421;
+
+    --gold:        #c9a86a;
+    --gold-bright: #ead08e;
+    --gold-soft:   #a8895a;
+    --gold-dim:    #6f5836;
+
+    --cream:       #f3e5be;
+    --cream-soft:  #d2c094;
+
+    --rose:        #c08a89;
+    --mauve:       #3a1f2e;
+
+    --serif: 'Newsreader', 'Cochin', 'Iowan Old Style', Georgia, serif;
+    --display: 'Fraunces', 'Newsreader', Georgia, serif;
+    --ui:    'Newsreader', system-ui, sans-serif;
+
+    --chip-h: 60px;
+    --coin: 38px;
+    --glyph-size: 22px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--canvas-0);
+    color: var(--cream);
+    font-family: var(--serif);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  body::before {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(60% 50% at 50% 35%, rgba(140, 90, 70, 0.10), transparent 70%),
+      radial-gradient(80% 60% at 50% 100%, rgba(40, 20, 30, 0.6), transparent 60%);
+  }
+  body::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.85  0 0 0 0 0.75  0 0 0 0 0.55  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    mix-blend-mode: screen;
+    opacity: .55;
+  }
+
+  .stage {
+    position: relative; z-index: 1;
+    max-width: 1180px; margin: 0 auto;
+    padding: 64px 40px 96px;
+    display: grid; grid-template-columns: 1fr; gap: 64px;
+  }
+
+  .header { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; }
+  .wordmark {
+    font-family: var(--display); font-style: italic; font-weight: 500;
+    font-size: 48px; letter-spacing: -0.01em; color: var(--cream);
+  }
+  .wordmark::after {
+    content: ''; display: inline-block;
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--gold);
+    margin-left: 14px; margin-bottom: 7px;
+    vertical-align: middle;
+    box-shadow: 0 0 14px rgba(201,168,106,0.6);
+  }
+  .crumb {
+    font-family: var(--serif); font-size: 13px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--cream-soft); font-weight: 500;
+  }
+  .crumb b { color: var(--gold); font-weight: 600; }
+
+  .frame {
+    background: linear-gradient(170deg, var(--canvas-2) 0%, var(--canvas-1) 100%);
+    border: 1px solid rgba(201,168,106,0.10);
+    border-radius: 18px;
+    padding: 44px 48px 48px;
+    position: relative;
+  }
+  .frame::before {
+    content: ''; position: absolute; left: 24px; right: 24px; top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(234,208,142,0.45), transparent);
+  }
+  .frame-title {
+    font-family: var(--serif); font-weight: 600;
+    font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--gold); margin: 0 0 8px;
+  }
+  .frame-sub {
+    font-family: var(--display); font-style: italic; font-weight: 400;
+    font-size: 26px; color: var(--cream); margin: 0 0 32px;
+    line-height: 1.35; max-width: 820px;
+  }
+  .frame-note {
+    font-family: var(--serif); font-size: 16px; color: var(--cream-soft);
+    line-height: 1.65; max-width: 760px; font-weight: 400;
+  }
+  .frame-note b { color: var(--cream); font-weight: 600; }
+
+  /* === COIN GLYPH SYSTEM ================================================= */
+  .glyphs {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;
+  }
+  .glyph-card {
+    background: var(--canvas-1);
+    border: 1px solid rgba(201,168,106,0.08);
+    border-radius: 14px;
+    padding: 30px 22px 24px;
+    text-align: center;
+  }
+  /* the coin — used both in the demo and inside the chip */
+  .coin {
+    width: 88px; height: 88px;
+    margin: 0 auto;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, var(--gold-bright) 0%, var(--gold) 55%, #a8895a 100%);
+    box-shadow:
+      0 0 0 1px rgba(255,235,180,0.35) inset,
+      0 0 0 1px rgba(0,0,0,0.4),
+      0 6px 16px rgba(0,0,0,0.55),
+      0 1px 0 rgba(255,255,255,0.08) inset;
+    display: grid; place-items: center;
+    position: relative;
+  }
+  .coin::after {
+    content: ''; position: absolute; inset: 6%;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.18);
+    pointer-events: none;
+  }
+  .coin svg {
+    width: 56%; height: 56%;
+    color: #1a0d16;
+    position: relative; z-index: 1;
+  }
+  .glyph-name {
+    font-family: var(--serif); font-weight: 600;
+    font-size: 18px; color: var(--cream); margin: 22px 0 6px;
+  }
+  .glyph-meaning {
+    font-family: var(--serif); font-weight: 400;
+    font-size: 14.5px; color: var(--cream-soft); line-height: 1.55;
+  }
+  .glyph-meaning .sub { display: block; opacity: 0.65; font-style: italic; font-size: 13.5px; margin-top: 4px; }
+
+  /* === CHIP — coin + tag ================================================ */
+  .chip {
+    display: inline-flex; align-items: center; gap: 14px;
+    height: var(--chip-h);
+    padding: 0 24px 0 11px;
+    border-radius: 999px;
+    cursor: pointer;
+    position: relative;
+    isolation: isolate;
+    border: none;
+    background:
+      linear-gradient(180deg, rgba(255,220,170,0.05) 0%, transparent 40%),
+      linear-gradient(168deg, #2c1822 0%, #1a0e15 100%);
+    color: var(--cream);
+    font-family: var(--serif);
+    font-style: normal;
+    font-weight: 600;
+    font-size: 17.5px;
+    letter-spacing: 0;
+    line-height: 1;
+    box-shadow:
+      inset 0 0 0 1px rgba(201,168,106,0.30),
+      inset 0 1px 0 rgba(234,208,142,0.12),
+      inset 0 -1px 0 rgba(0,0,0,0.4),
+      0 1px 1px rgba(0,0,0,0.5),
+      0 0 0 1px rgba(201,168,106,0.04);
+    transition: transform 0.25s cubic-bezier(.2,.7,.2,1),
+                box-shadow 0.25s ease,
+                background 0.25s ease;
+  }
+  .chip::after {
+    content: ''; position: absolute; inset: 1px;
+    border-radius: inherit; pointer-events: none;
+    background: linear-gradient(180deg, rgba(234,208,142,0.08), transparent 35%);
+    opacity: 0.85;
+    transition: opacity 0.25s ease;
+  }
+  .chip:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 0 0 1px rgba(234,208,142,0.6),
+      inset 0 1px 0 rgba(234,208,142,0.2),
+      inset 0 -1px 0 rgba(0,0,0,0.4),
+      0 2px 6px rgba(0,0,0,0.5),
+      0 0 0 1px rgba(201,168,106,0.10),
+      0 0 24px rgba(201,168,106,0.10);
+  }
+  .chip:hover .chip-coin {
+    box-shadow:
+      0 0 0 1px rgba(255,245,200,0.55) inset,
+      0 0 0 1px rgba(0,0,0,0.4),
+      0 4px 12px rgba(0,0,0,0.55),
+      0 0 18px rgba(234,208,142,0.35);
+  }
+  .chip:hover .chip-coin svg { transform: rotate(2deg); }
+  .chip:active { transform: translateY(0); }
+  .chip:active .chip-coin svg { transform: rotate(6deg) scale(0.94); }
+
+  /* the coin inside a chip */
+  .chip-coin {
+    width: var(--coin); height: var(--coin);
+    flex: 0 0 var(--coin);
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, var(--gold-bright) 0%, var(--gold) 60%, #a8895a 100%);
+    box-shadow:
+      0 0 0 1px rgba(255,235,180,0.30) inset,
+      0 0 0 1px rgba(0,0,0,0.45),
+      0 2px 6px rgba(0,0,0,0.4),
+      0 1px 0 rgba(255,255,255,0.10) inset;
+    display: grid; place-items: center;
+    position: relative;
+    transition: box-shadow 0.25s ease;
+  }
+  .chip-coin::after {
+    content: ''; position: absolute; inset: 8%;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.16);
+    pointer-events: none;
+  }
+  .chip-coin svg {
+    width: 22px; height: 22px;
+    color: #1a0d16;
+    position: relative; z-index: 1;
+    transition: transform 0.4s cubic-bezier(.2,.7,.2,1);
+  }
+  .chip-label { white-space: nowrap; }
+
+  /* === COMPOSER ========================================================= */
+  .composer {
+    margin-top: 32px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 14px 14px 24px;
+    background: var(--canvas-0);
+    border: 1px solid rgba(201,168,106,0.14);
+    border-radius: 999px;
+  }
+  .composer-input { flex: 1; font-family: var(--serif); font-size: 18px; color: rgba(243, 229, 190, 0.50); }
+  .composer-mic {
+    width: 42px; height: 42px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #2c1a28, #100810 80%);
+    border: 1px solid rgba(201,168,106,0.42);
+    display: grid; place-items: center; color: var(--gold);
+  }
+
+  .divider {
+    display: flex; align-items: center; gap: 14px;
+    margin: 0 0 24px;
+    color: var(--gold-soft);
+  }
+  .divider .line {
+    flex: 1; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(201,168,106,0.28), transparent);
+  }
+  .divider .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 8px rgba(201,168,106,0.5);
+  }
+
+  .compare {
+    display: grid; grid-template-columns: 1.1fr 0.9fr;
+    gap: 40px; align-items: start;
+  }
+  @media (max-width: 900px) { .compare { grid-template-columns: 1fr; } }
+
+  .variant-label {
+    font-family: var(--serif); font-size: 12.5px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--cream-soft); font-weight: 600;
+    margin: 0 0 14px;
+  }
+  .variant-label b { color: var(--gold); font-weight: 600; }
+
+  .phone {
+    width: 100%; max-width: 400px; margin: 0 auto;
+    background: var(--canvas-1);
+    border-radius: 38px;
+    border: 1px solid rgba(201,168,106,0.10);
+    padding: 24px 20px 22px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.02);
+    position: relative;
+  }
+  .phone .status {
+    display: flex; justify-content: space-between;
+    font-family: var(--serif); font-size: 12px; color: var(--cream-soft);
+    margin-bottom: 22px; font-weight: 500;
+  }
+  .phone .bot-name {
+    font-family: var(--display); font-style: italic; font-size: 26px;
+    color: var(--cream); margin-bottom: 20px;
+    display: flex; align-items: baseline; gap: 8px;
+    font-weight: 500;
+  }
+  .phone .bot-name::before {
+    content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--gold);
+    display: inline-block; transform: translateY(-3px);
+  }
+  .phone .bubble {
+    font-family: var(--serif); font-size: 16.5px;
+    color: var(--cream); line-height: 1.6; margin-bottom: 24px; font-weight: 400;
+  }
+  .phone .bubble b { color: var(--gold-bright); font-weight: 600; }
+  .phone .listen {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--serif); font-size: 14px; color: var(--cream); font-weight: 500;
+    background: rgba(201,168,106,0.08);
+    border: 1px solid rgba(201,168,106,0.28);
+    border-radius: 999px;
+    padding: 6px 14px; margin-bottom: 18px;
+  }
+  .phone .listen::before { content: '▸'; color: var(--gold); }
+
+  .chip-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 11px;
+    margin-top: 6px;
+  }
+  .chip-grid .chip { width: 100%; padding-right: 16px; font-size: 16px; gap: 12px; padding-left: 9px; }
+  .chip-grid .chip-coin { width: 34px; height: 34px; flex-basis: 34px; }
+  .chip-grid .chip-coin svg { width: 19px; height: 19px; }
+
+  /* deferred / v2 — primary chip styling, shown faded */
+  .deferred {
+    margin-top: 36px;
+    padding: 28px 28px 28px;
+    border: 1px dashed rgba(201,168,106,0.20);
+    border-radius: 14px;
+    background: rgba(0,0,0,0.18);
+  }
+  .deferred-tag {
+    font-family: var(--serif); font-size: 11px; letter-spacing: 0.22em;
+    color: var(--gold-soft); font-weight: 600; text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .chip.primary {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.18), transparent 50%),
+      linear-gradient(168deg, var(--gold-bright) 0%, var(--gold) 100%);
+    color: #1a0d16;
+    box-shadow:
+      inset 0 0 0 1px rgba(255,245,200,0.4),
+      0 4px 12px rgba(201,168,106,0.25);
+  }
+  .chip.primary .chip-coin {
+    background: radial-gradient(circle at 32% 28%, #4a2236, #1a0d16 80%);
+    box-shadow:
+      0 0 0 1px rgba(255,245,200,0.45) inset,
+      0 1px 0 rgba(255,255,255,0.10) inset;
+  }
+  .chip.primary .chip-coin svg { color: var(--gold-bright); }
+
+  .ladder {
+    display: grid; grid-template-columns: 100px 1fr; gap: 14px 24px;
+    align-items: baseline;
+    background: var(--canvas-1);
+    border: 1px solid rgba(201,168,106,0.08);
+    border-radius: 14px;
+    padding: 28px 32px;
+  }
+  .ladder .size-tag {
+    font-family: var(--serif); font-size: 12px; letter-spacing: 0.15em;
+    color: var(--gold-soft); text-transform: uppercase; font-weight: 600;
+    border-right: 1px solid rgba(201,168,106,0.12);
+    padding-right: 16px; text-align: right;
+  }
+  .l-sample-1 { font-family: var(--display); font-style: italic; font-size: 32px; font-weight: 500; color: var(--cream); }
+  .l-sample-2 { font-family: var(--display); font-style: italic; font-size: 22px; font-weight: 400; color: var(--cream); }
+  .l-sample-3 { font-family: var(--serif); font-size: 17px; font-weight: 400; line-height: 1.6; color: var(--cream); }
+  .l-sample-4 { font-family: var(--serif); font-size: 17.5px; font-weight: 600; color: var(--cream); }
+
+  footer {
+    text-align: center;
+    font-family: var(--display); font-style: italic;
+    color: var(--cream-soft); font-size: 15px;
+    padding: 32px 0 0;
+  }
+
+  code.k {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.86em; color: var(--gold-bright);
+    background: rgba(0,0,0,0.35); padding: 2px 7px; border-radius: 4px;
+  }
+
+  /* entrance stagger demo */
+  @keyframes chipIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .stagger .chip { animation: chipIn 280ms cubic-bezier(.2,.7,.2,1) backwards; }
+  .stagger .chip:nth-child(1) { animation-delay: 0ms; }
+  .stagger .chip:nth-child(2) { animation-delay: 60ms; }
+  .stagger .chip:nth-child(3) { animation-delay: 120ms; }
+  .stagger .chip:nth-child(4) { animation-delay: 180ms; }
+
+  /* live demo: replay button */
+  .replay {
+    font-family: var(--serif); font-size: 13px; color: var(--gold);
+    background: transparent; border: 1px solid rgba(201,168,106,0.3);
+    border-radius: 999px; padding: 7px 14px; cursor: pointer;
+    font-weight: 600;
+  }
+  .replay:hover { background: rgba(201,168,106,0.08); }
+</style>
+</head>
+<body>
+<main class="stage">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="wordmark">Layla</div>
+    <div class="crumb">design study · <b>doorway chips</b> · coin &amp; tag</div>
+  </header>
+
+  <!-- THE PIVOT -->
+  <section class="frame">
+    <p class="frame-title">i. the pivot — coin &amp; tag</p>
+    <h2 class="frame-sub">Flip the contrast <i>inside</i> the chip. The pill stays dark and refined (the tag). The leading medallion becomes a solid gold disc with the glyph knocked out in dark (the coin).</h2>
+
+    <p class="frame-note">
+      <b>The problem:</b> v1 was beautiful but whispery — all four chips were dim-on-dim with no bright landing point for the eye. Other apps have a focal mark per CTA that pulls the thumb. The <b>coin</b> is that mark.
+      <br /><br />
+      <b>What changes per chip:</b> the medallion becomes a real gold disc with depth (radial gold gradient, hairline rim, drop shadow) and the glyph reverses to dark mauve. Every chip now reads as "tap here." The pill itself stays dark + refined, so the brand mystique survives.
+    </p>
+  </section>
+
+  <!-- COIN GLYPHS -->
+  <section class="frame">
+    <p class="frame-title">ii. the four coins</p>
+    <h2 class="frame-sub">Four marks, one hand. Same circle, same stroke, all knocked out of solid gold.</h2>
+
+    <div class="glyphs">
+      <div class="glyph-card">
+        <div class="coin">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="12" r="2.4" />
+            <line x1="12" y1="3.4" x2="12" y2="5.6" />
+            <line x1="12" y1="18.4" x2="12" y2="20.6" />
+            <line x1="3.4" y1="12" x2="5.6" y2="12" />
+            <line x1="18.4" y1="12" x2="20.6" y2="12" />
+          </svg>
+        </div>
+        <div class="glyph-name">Astrolabe</div>
+        <div class="glyph-meaning">Go deeper on the map<span class="sub">__doorway_question</span></div>
+      </div>
+
+      <div class="glyph-card">
+        <div class="coin">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <path d="M12 12 m 0 0 a 1 1 0 1 1 1 -1 a 2.2 2.2 0 1 1 -2.2 -2.2 a 3.6 3.6 0 1 1 3.6 -3.6 a 5.4 5.4 0 1 1 -5.4 -5.4" transform="translate(-0.6,0.6)" />
+          </svg>
+        </div>
+        <div class="glyph-name">Spiral</div>
+        <div class="glyph-meaning">Something on my mind<span class="sub">__doorway_situation</span></div>
+      </div>
+
+      <div class="glyph-card">
+        <div class="coin">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <circle cx="9" cy="12" r="5.6" />
+            <circle cx="15" cy="12" r="5.6" />
+          </svg>
+        </div>
+        <div class="glyph-name">Vesica</div>
+        <div class="glyph-meaning">Add someone<span class="sub">__doorway_person</span></div>
+      </div>
+
+      <div class="glyph-card">
+        <div class="coin">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <path d="M16.5 4.5 A 9 9 0 1 0 16.5 19.5 A 7 8.5 0 1 1 16.5 4.5 Z" />
+            <circle cx="19.5" cy="6.5" r="0.85" fill="currentColor" stroke="none" />
+          </svg>
+        </div>
+        <div class="glyph-name">Crescent</div>
+        <div class="glyph-meaning">Just let me sit with this<span class="sub">__doorway_reflect</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- IN CONTEXT -->
+  <section class="frame">
+    <p class="frame-title">iii. in context</p>
+    <h2 class="frame-sub">Four gold coins on dark tags. Hover the chips on the left, replay the stagger on the right.</h2>
+
+    <div class="compare">
+      <!-- stand-alone chips -->
+      <div>
+        <p class="variant-label">anatomy · <b>hover any chip</b></p>
+        <div style="display:flex; flex-direction:column; gap: 12px; max-width: 380px;">
+          <button class="chip">
+            <span class="chip-coin">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/>
+                <line x1="12" y1="3.4" x2="12" y2="5.6"/><line x1="12" y1="18.4" x2="12" y2="20.6"/>
+                <line x1="3.4" y1="12" x2="5.6" y2="12"/><line x1="18.4" y1="12" x2="20.6" y2="12"/>
+              </svg>
+            </span>
+            <span class="chip-label">Go deeper on the map</span>
+          </button>
+          <button class="chip">
+            <span class="chip-coin">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                <path d="M12 12 m 0 0 a 1 1 0 1 1 1 -1 a 2.2 2.2 0 1 1 -2.2 -2.2 a 3.6 3.6 0 1 1 3.6 -3.6 a 5.4 5.4 0 1 1 -5.4 -5.4" transform="translate(-0.6,0.6)"/>
+              </svg>
+            </span>
+            <span class="chip-label">Something on my mind</span>
+          </button>
+          <button class="chip">
+            <span class="chip-coin">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                <circle cx="9" cy="12" r="5.6"/><circle cx="15" cy="12" r="5.6"/>
+              </svg>
+            </span>
+            <span class="chip-label">Add someone</span>
+          </button>
+          <button class="chip">
+            <span class="chip-coin">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                <path d="M16.5 4.5 A 9 9 0 1 0 16.5 19.5 A 7 8.5 0 1 1 16.5 4.5 Z"/>
+                <circle cx="19.5" cy="6.5" r="0.85" fill="currentColor" stroke="none"/>
+              </svg>
+            </span>
+            <span class="chip-label">Just let me sit with this</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- phone preview with stagger -->
+      <div>
+        <p class="variant-label" style="display:flex; align-items:center; justify-content:space-between;">
+          <span>in context · <b>2 × 2 grid</b></span>
+          <button class="replay" onclick="document.getElementById('stagger-grid').classList.remove('stagger'); requestAnimationFrame(() => document.getElementById('stagger-grid').classList.add('stagger'));">↺ Replay stagger</button>
+        </p>
+        <div class="phone">
+          <div class="status"><span>16:07</span><span>72%</span></div>
+          <div class="bot-name">Layla</div>
+          <div class="bubble">
+            That's the foundation. Now we bring it into your real life.
+            <br /><br />
+            Three ways to keep going: <b>go deeper on the map</b>, share <b>something on your mind</b>, or <b>add someone</b> whose chart should sit beside yours.
+          </div>
+          <div class="listen">Listen</div>
+
+          <div class="divider"><span class="line"></span><span class="dot"></span><span class="line"></span></div>
+
+          <div class="chip-grid stagger" id="stagger-grid">
+            <button class="chip"><span class="chip-coin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/><line x1="12" y1="3.4" x2="12" y2="5.6"/><line x1="12" y1="18.4" x2="12" y2="20.6"/><line x1="3.4" y1="12" x2="5.6" y2="12"/><line x1="18.4" y1="12" x2="20.6" y2="12"/></svg></span><span class="chip-label">Go deeper</span></button>
+            <button class="chip"><span class="chip-coin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 12 m 0 0 a 1 1 0 1 1 1 -1 a 2.2 2.2 0 1 1 -2.2 -2.2 a 3.6 3.6 0 1 1 3.6 -3.6 a 5.4 5.4 0 1 1 -5.4 -5.4" transform="translate(-0.6,0.6)"/></svg></span><span class="chip-label">On my mind</span></button>
+            <button class="chip"><span class="chip-coin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="9" cy="12" r="5.6"/><circle cx="15" cy="12" r="5.6"/></svg></span><span class="chip-label">Add someone</span></button>
+            <button class="chip"><span class="chip-coin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M16.5 4.5 A 9 9 0 1 0 16.5 19.5 A 7 8.5 0 1 1 16.5 4.5 Z"/><circle cx="19.5" cy="6.5" r="0.85" fill="currentColor" stroke="none"/></svg></span><span class="chip-label">Sit with this</span></button>
+          </div>
+
+          <div class="composer">
+            <div class="composer-input">Tell Layla…</div>
+            <div class="composer-mic">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEFERRED: primary chip preview -->
+    <div class="deferred">
+      <p class="deferred-tag">— deferred to v2 —</p>
+      <p class="frame-note" style="margin: 0 0 14px;">
+        Once the brain repo agrees on a <code class="k">primary: true</code> flag per turn, <b>one chip</b> can render as a filled gold pill that visually leads. Same coin, but the coin reverses to dark mauve and the pill itself becomes the gold. Theme tokens are staged in <code class="k">theme.ts</code> now; wiring is a 10-line follow-up.
+      </p>
+      <button class="chip primary" style="max-width: 280px;">
+        <span class="chip-coin">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/>
+            <line x1="12" y1="3.4" x2="12" y2="5.6"/><line x1="12" y1="18.4" x2="12" y2="20.6"/>
+            <line x1="3.4" y1="12" x2="5.6" y2="12"/><line x1="18.4" y1="12" x2="20.6" y2="12"/>
+          </svg>
+        </span>
+        <span class="chip-label">Go deeper on the map</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- TYPE LADDER -->
+  <section class="frame">
+    <p class="frame-title">iv. type ladder</p>
+    <h2 class="frame-sub">Optimized for readers 40+. Upright, not italic. Bigger.</h2>
+
+    <div class="ladder">
+      <div class="size-tag">DISPLAY · 32</div>
+      <div class="l-sample-1">Layla — your handmade map.</div>
+
+      <div class="size-tag">VOICE · 22</div>
+      <div class="l-sample-2">That's the foundation. Now we bring it into your life.</div>
+
+      <div class="size-tag">BUBBLE · 17</div>
+      <div class="l-sample-3">Three ways to keep going: go deeper on the map, share what's on your mind, or add someone whose chart should sit beside yours.</div>
+
+      <div class="size-tag">CHIP · 17.5</div>
+      <div class="l-sample-4">Go deeper on the map</div>
+    </div>
+
+    <p class="frame-note" style="margin-top: 24px;">
+      <b>Note on font:</b> in the iOS app we'll use the brand's existing <code class="k">theme.fontSerif</code> (Cochin on iOS, serif fallback on Android) at <b>18pt / weight 700 / upright</b>. Avoids the dependency of loading Newsreader. If the device-side render looks thin, we add <code class="k">expo-font</code> + Newsreader in a follow-up (≈10 lines).
+    </p>
+  </section>
+
+  <footer>Layla · doorway chips · coin &amp; tag</footer>
+</main>
+</body>
+</html>
