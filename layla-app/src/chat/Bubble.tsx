@@ -43,6 +43,11 @@ interface Props {
    * gold dot leads at the right edge (where the reading eye starts in
    * RTL), and right-align text content. Defaults to "en". */
   lang?: "en" | "he";
+  /** Long-press on a completed, substantial bot bubble (≥220 chars,
+   * not a chart-sigil header) fires this with the stripped text. The
+   * host (ChatScreen) opens the share-as-card preview. Streaming
+   * bubbles never call this — the text is still growing. */
+  onLongPressShare?: (text: string) => void;
 }
 
 /**
@@ -57,7 +62,7 @@ interface Props {
  * gold dot blooms in slightly after Layla's text starts settling — small
  * timing detail that makes her presence feel composed rather than abrupt.
  */
-export function Bubble({ message, onImagePress, lang = "en" }: Props) {
+export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }: Props) {
   const isUser = message.role === "user";
   const isRTL = lang === "he";
   // Memoize per-bubble so streaming-token re-renders + chat-state
@@ -142,12 +147,35 @@ export function Bubble({ message, onImagePress, lang = "en" }: Props) {
     );
   }
 
+  // Long-press is gated to substantial completed bot bubbles — same
+  // threshold as the Listen pill, with chart-sigil headers excluded
+  // (those don't render well as a quote card). The host receives the
+  // stripped text so the card matches what the user sees on screen.
+  const shareEligible =
+    !message.streaming
+    && text.length >= PLAY_BUTTON_MIN_CHARS
+    && !isChartSigilBubble(text)
+    && !!onLongPressShare;
+  const handleLongPress = shareEligible
+    ? () => onLongPressShare!(text)
+    : undefined;
+
   return (
     <Animated.View
       testID={message.streaming ? "bubble-bot-streaming" : "bubble-bot"}
       style={[styles.row, { opacity: fade, transform: [{ translateY: lift }] }]}
     >
-      <View style={[styles.botRow, isRTL && styles.botRowRTL]}>
+      <Pressable
+        onLongPress={handleLongPress}
+        delayLongPress={550}
+        // Plain tap stays a no-op so we don't accidentally fire on
+        // brushes; only long-press triggers the share affordance.
+        disabled={!shareEligible}
+        accessibilityHint={
+          shareEligible ? "Long press to share this reading as a card" : undefined
+        }
+        style={[styles.botRow, isRTL && styles.botRowRTL]}
+      >
         <Animated.View
           style={[styles.botDot, { transform: [{ scale: dotScale }] }]}
         />
@@ -198,7 +226,7 @@ export function Bubble({ message, onImagePress, lang = "en" }: Props) {
             <PlayButton text={text} />
           ) : null}
         </View>
-      </View>
+      </Pressable>
     </Animated.View>
   );
 }

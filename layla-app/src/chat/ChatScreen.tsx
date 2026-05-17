@@ -32,6 +32,8 @@ import {
 import { AdminBuildBanner } from "./AdminBuildBanner";
 import { Bubble, PLAY_BUTTON_MIN_CHARS } from "./Bubble";
 import { Composer } from "./Composer";
+import { renderInsightCard } from "../api/card";
+import { AppleSignInNudge } from "../auth/AppleSignInNudge";
 import { ImageLightbox } from "./ImageLightbox";
 import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator } from "./TypingIndicator";
@@ -91,6 +93,35 @@ export function ChatScreen({
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  const [cardRendering, setCardRendering] = useState(false);
+
+  // Long-press on a substantial bot bubble → render a shareable
+  // 1080×1080 PNG card via POST /v1/card/render and surface it in the
+  // existing ImageLightbox (which already has Save-to-Photos + Share).
+  // The rendered card is passed as a data: URL — ImageLightbox handles
+  // data-URL materialization for the system Save / Share calls. We
+  // never show the loading state for long because the render is ~80ms
+  // server-side; a short alert covers the brief network round-trip
+  // without blocking the bubble.
+  const handleShareAsCard = useCallback(
+    async (text: string) => {
+      if (!session?.jwt) return;
+      if (cardRendering) return;
+      setCardRendering(true);
+      try {
+        const b64 = await renderInsightCard(session.jwt, text);
+        setLightboxUri(`data:image/png;base64,${b64}`);
+      } catch (e: any) {
+        Alert.alert(
+          "Couldn't make a card",
+          e?.message || "Something went wrong. Try again.",
+        );
+      } finally {
+        setCardRendering(false);
+      }
+    },
+    [session?.jwt, cardRendering],
+  );
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminBuild, setAdminBuild] = useState<MeBuild | null>(null);
   const insets = useSafeAreaInsets();
@@ -552,7 +583,12 @@ export function ChatScreen({
             renderItem={({ item }) => (
               // Quick-reply chips render in a sticky row above the
               // Composer (see below) so the keyboard never hides them.
-              <Bubble message={item} onImagePress={setLightboxUri} lang={lang} />
+              <Bubble
+                message={item}
+                onImagePress={setLightboxUri}
+                lang={lang}
+                onLongPressShare={handleShareAsCard}
+              />
             )}
             ListFooterComponent={showTyping ? <TypingIndicator /> : null}
             keyboardShouldPersistTaps="handled"
@@ -638,9 +674,32 @@ export function ChatScreen({
 
       <ImageLightbox uri={lightboxUri} onClose={() => setLightboxUri(null)} />
 
+      {/* Tiny floating "rendering card…" toast while the share-as-card
+          fetch is in flight. Non-blocking — the user can still read the
+          chat. The fetch is fast (~80ms server-side + network) so this
+          is barely visible in practice, but it gives the right
+          immediate feedback that the long-press was registered. */}
+      {cardRendering ? (
+        <View style={styles.cardToast} pointerEvents="none">
+          <ActivityIndicator size="small" color={theme.accent} />
+          <Text style={styles.cardToastText}>Rendering card…</Text>
+        </View>
+      ) : null}
+
       {/* Admin-only one-shot build banner — fades in when a new deploy
           has landed since this user last opened the app. */}
       <AdminBuildBanner isAdmin={isAdmin} build={adminBuild} />
+
+      {/* One-shot Apple Sign-In nudge — surfaces only after the user
+          has sent 3+ messages while on an anon device-only account.
+          Dismiss persists forever per userId. iOS only (and a no-op on
+          web). See AppleSignInNudge for the gating logic. */}
+      {session ? (
+        <AppleSignInNudge
+          userId={session.userId}
+          userMessageCount={messages.filter((m) => m.role === "user").length}
+        />
+      ) : null}
     </View>
   );
 }
@@ -761,6 +820,25 @@ function ChatHeader({
 }
 
 const styles = StyleSheet.create({
+  cardToast: {
+    position: "absolute",
+    alignSelf: "center",
+    bottom: 120,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+    backgroundColor: "rgba(28,22,32,0.92)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(212,165,116,0.35)",
+  },
+  cardToastText: {
+    color: theme.textSubtle,
+    fontSize: 13,
+    fontStyle: "italic",
+    marginLeft: 10,
+  },
   root: { flex: 1, backgroundColor: theme.bg },
   kav: { flex: 1 },
   center: {
