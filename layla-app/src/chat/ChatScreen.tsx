@@ -62,9 +62,20 @@ const CHAT_PERSIST_DEBOUNCE_MS = 500;
 export interface ChatScreenProps {
   onOpenSettings?: () => void;
   onOpenPeople?: () => void;
+  /** When non-null, ChatScreen sends this text to the WS as soon as
+   * the connection is open and clears the slot via onPendingConsumed.
+   * Used by the People tab's "+" button and "Talk to Layla about X"
+   * deep-links. */
+  pendingMessage?: string | null;
+  onPendingConsumed?: () => void;
 }
 
-export function ChatScreen({ onOpenSettings, onOpenPeople }: ChatScreenProps = {}) {
+export function ChatScreen({
+  onOpenSettings,
+  onOpenPeople,
+  pendingMessage,
+  onPendingConsumed,
+}: ChatScreenProps = {}) {
   const [session, setSession] = useState<Session | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
@@ -207,6 +218,19 @@ export function ChatScreen({ onOpenSettings, onOpenPeople }: ChatScreenProps = {
       prefetchAudio({ text: target!.text, jwt: session.jwt }).catch(() => {});
     })();
   }, [messages, session]);
+
+  // Pending deep-link from the People tab: the host queues a text via
+  // `pendingMessage` and we send it as soon as the WS is open. Cleared
+  // via `onPendingConsumed` so the same message can't fire twice.
+  // We send via the normal `send()` so the message renders in the
+  // composer-echo position and smart-snap fires identically.
+  useEffect(() => {
+    if (!pendingMessage) return;
+    if (status !== "open") return;
+    send(pendingMessage);
+    onPendingConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingMessage, status]);
 
   // When a long bot bubble lands (first-map section, deep chat reply,
   // etc.) the user needs the full screen to read. If the keyboard is

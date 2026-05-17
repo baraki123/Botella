@@ -17,6 +17,11 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [route, setRoute] = useState<Route>("signin");
+  // Deep-link queue: when People taps "+" or "Talk about X", we queue
+  // the text here, switch route → "chat", and ChatScreen sends it
+  // (then calls onPendingConsumed to clear). Plain prop drilling beats
+  // pulling in a state lib for one signal.
+  const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +75,8 @@ export default function App() {
         <ChatScreen
           onOpenSettings={() => setRoute("settings")}
           onOpenPeople={() => setRoute("people")}
+          pendingMessage={pendingChatMessage}
+          onPendingConsumed={() => setPendingChatMessage(null)}
         />
         {route === "settings" ? (
           <View style={StyleSheet.absoluteFillObject}>
@@ -84,6 +91,10 @@ export default function App() {
             <PeopleScreen
               jwt={session.jwt}
               onClose={() => setRoute("chat")}
+              onSendToChat={(text) => {
+                setPendingChatMessage(text);
+                setRoute("chat");
+              }}
             />
           </View>
         ) : null}

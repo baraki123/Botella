@@ -31,6 +31,10 @@ export interface OrbitPerson {
   birth_place: string;
   current_dynamic: string;
   current_relationship_theme: string;
+  /** Cached person-snapshot LLM output from the orbit-add flow. */
+  snapshot?: string;
+  /** Cached compatibility reading from the orbit-add flow. */
+  compatibility_reading?: string;
   synastry_aspects: OrbitPersonSynastryAspect[];
   created_at: string;
   updated_at: string;
