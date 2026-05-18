@@ -6,6 +6,7 @@ export type EventType =
   | "complete"
   | "quick_replies"
   | "media"
+  | "paginated_read"
   | "turn_end"
   | "error";
 

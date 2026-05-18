@@ -20,6 +20,7 @@ from botella.contract import (
     WaitFor,
     complete,
     media,
+    paginated_read,
     quick_replies,
     text,
     token,
@@ -50,4 +51,5 @@ __all__ = [
     "complete",
     "quick_replies",
     "media",
+    "paginated_read",
 ]

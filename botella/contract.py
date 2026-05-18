@@ -53,7 +53,8 @@ class InboundMessage:
 # ─── Outbound ────────────────────────────────────────────────────────────────
 
 EventType = Literal[
-    "text", "typing", "token", "complete", "quick_replies", "media"
+    "text", "typing", "token", "complete", "quick_replies", "media",
+    "paginated_read",
 ]
 
 
@@ -108,6 +109,51 @@ def media(
     return OutboundEvent(
         "media",
         {"image": image, "image_url": image_url, "caption": caption},
+    )
+
+
+def paginated_read(
+    *,
+    sections: list[str],
+    chip_labels: list[str],
+    post_text: str = "",
+    doorway_options: list[dict[str, Any]] | None = None,
+) -> OutboundEvent:
+    """A multi-section read paginated client-side.
+
+    Carries every section's text + the Continue chip label for each
+    transition + the post-read pivot text + any chips to show after the
+    last section. The client renders section 0 immediately, then walks
+    forward locally on each Continue tap (zero round-trip per tap).
+    After the final section the post_text + doorway_options render
+    inline, and the user's next message — typically a doorway tap —
+    routes through free_chat normally.
+
+    The brain transitions to Done() right after emitting this event,
+    so subsequent user input lands on free_chat without an intermediate
+    holding state. Resume (WS drop mid-read) is NOT supported in v1:
+    if the client drops, the prefetched sections live only in memory.
+    For a 9-section ~5-min read this is acceptable; revisit if usage
+    patterns prove otherwise.
+
+    Fields:
+      sections        : list of bubble texts to render one-at-a-time
+      chip_labels     : Continue chip label for each transition
+                        (must be `len(sections)` long — the last one is
+                        the "final" chip that triggers the post-pivot)
+      post_text       : optional text bubble emitted client-side after
+                        the final section
+      doorway_options : optional quick_replies options shown after the
+                        post_text (same shape as quick_replies)
+    """
+    return OutboundEvent(
+        "paginated_read",
+        {
+            "sections": list(sections),
+            "chip_labels": list(chip_labels),
+            "post_text": post_text or "",
+            "doorway_options": list(doorway_options or []),
+        },
     )
 
 

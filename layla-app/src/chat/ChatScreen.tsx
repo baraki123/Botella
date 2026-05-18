@@ -39,7 +39,7 @@ import { QuickReplies } from "./QuickReplies";
 import { TypingIndicator } from "./TypingIndicator";
 import { Glow } from "./atmosphere/Glow";
 import { Starfield } from "./atmosphere/Starfield";
-import type { Message } from "./types";
+import type { Message, QuickReplyOption } from "./types";
 import { KEYBOARD_VERTICAL_OFFSET_IOS, useChatScroll } from "./useChatScroll";
 
 function uid(): string {
@@ -89,6 +89,16 @@ export function ChatScreen({
   const streamRef = useRef<StreamClient | null>(null);
   const streamingIdRef = useRef<string | null>(null);
   const startedRef = useRef(false);
+  // Buffer for the paginated_read event (full first-map read). Holds
+  // the sections we haven't rendered yet + their Continue-chip labels
+  // + the post-map pivot text + doorway chips. Continue taps walk
+  // through this entirely client-side — no WS round-trip per section.
+  const paginatedReadRef = useRef<{
+    sections: string[];
+    chipLabels: string[];
+    postText: string;
+    doorways: QuickReplyOption[];
+  } | null>(null);
   const voice = useVoiceRecorder();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -410,6 +420,38 @@ export function ChatScreen({
         return;
       }
 
+      case "paginated_read": {
+        // Brain ships the entire first-map read (9 sections + Continue
+        // chip labels + post-map pivot text + doorway chips) in ONE
+        // event. Render section 0 immediately with its Continue chip;
+        // buffer the rest for local pagination so subsequent Continue
+        // taps render zero-round-trip from cache (see pickQuickReply's
+        // `__paginated_advance` intercept).
+        setShowTyping(false);
+        const sections: string[] = event.payload.sections || [];
+        const chipLabels: string[] = event.payload.chip_labels || [];
+        const postText: string = event.payload.post_text || "";
+        const doorways: QuickReplyOption[] = event.payload.doorway_options || [];
+        if (sections.length === 0) return;
+        const firstLabel = chipLabels[0] || "Continue →";
+        setMessages((m) => [
+          ...m,
+          {
+            id: uid(),
+            role: "bot",
+            text: sections[0],
+            quickReplies: [{ label: firstLabel, value: "__paginated_advance" }],
+          },
+        ]);
+        paginatedReadRef.current = {
+          sections: sections.slice(1),
+          chipLabels: chipLabels.slice(1),
+          postText,
+          doorways,
+        };
+        return;
+      }
+
       case "media": {
         // Inline image (e.g. natal chart PNG). Server scrubs raw bytes into
         // a base64 data URL on `image_data_url`; older payloads may carry
@@ -511,6 +553,21 @@ export function ChatScreen({
     displayLabel: string,
     fromMessageId: string,
   ) {
+    // Paginated-read intercept: Continue taps on the first-map read
+    // walk a buffered list locally — no WS round-trip, no user-bubble
+    // echo (the user isn't "saying" anything to Layla, they're just
+    // turning the page). Falls through to the normal path if there's
+    // no buffered read (defensive — value should never appear without
+    // a paginated_read event setting up the ref).
+    if (sendValue === "__paginated_advance") {
+      setMessages((m) =>
+        m.map((msg) =>
+          msg.id === fromMessageId ? { ...msg, quickReplies: undefined } : msg,
+        ),
+      );
+      advancePaginatedRead();
+      return;
+    }
     // Remove the chips so they can't be tapped twice. (URL-form chips
     // never reach this callback — they open externally via Linking.)
     setMessages((m) =>
@@ -525,6 +582,44 @@ export function ChatScreen({
     // value === label or value !== label.
     setMessages((m) => [...m, { id: uid(), role: "user", text: displayLabel }]);
     streamRef.current?.send({ text: sendValue });
+  }
+
+  function advancePaginatedRead() {
+    const state = paginatedReadRef.current;
+    if (!state) return;
+    if (state.sections.length === 0) {
+      // Final tap — emit post-map pivot text + doorway chips. The
+      // user's next real input (typically a doorway chip) routes
+      // through free_chat normally.
+      setMessages((m) => [
+        ...m,
+        {
+          id: uid(),
+          role: "bot",
+          text: state.postText,
+          quickReplies: state.doorways,
+        },
+      ]);
+      paginatedReadRef.current = null;
+      return;
+    }
+    const nextText = state.sections[0];
+    const nextLabel = state.chipLabels[0] || "Continue →";
+    setMessages((m) => [
+      ...m,
+      {
+        id: uid(),
+        role: "bot",
+        text: nextText,
+        quickReplies: [{ label: nextLabel, value: "__paginated_advance" }],
+      },
+    ]);
+    paginatedReadRef.current = {
+      sections: state.sections.slice(1),
+      chipLabels: state.chipLabels.slice(1),
+      postText: state.postText,
+      doorways: state.doorways,
+    };
   }
 
   if (authError) {
