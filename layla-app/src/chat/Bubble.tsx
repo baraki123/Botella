@@ -31,7 +31,12 @@ export const PLAY_BUTTON_MIN_CHARS = 220;
 // suppress the pill.
 const ASTRO_SIGILS = /[☀☾↑☿♀♂♃♄♅♆♇⚷]/g;
 function isChartSigilBubble(text: string): boolean {
-  if (/your chart['']?s ready|המפה שלך מוכנה/i.test(text)) return true;
+  // Lead-in phrases the brain emits with the sigil block. New format
+  // ("here's your map") replaced the old ("your chart's ready"); we
+  // match both so older sessions still suppress the Listen pill. As a
+  // safety net we also count astrology sigils — two or more = sigil
+  // block even when the lead-in copy drifts again.
+  if (/here['']?s your map|your chart['']?s ready|הנה המפה שלך|המפה שלך מוכנה/i.test(text)) return true;
   const sigilCount = (text.match(ASTRO_SIGILS) || []).length;
   return sigilCount >= 2;
 }
