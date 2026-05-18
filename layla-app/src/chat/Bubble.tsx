@@ -22,6 +22,21 @@ import type { Message } from "./types";
 // new bubbles to prefetch TTS audio for.
 export const PLAY_BUTTON_MIN_CHARS = 220;
 
+// Typewriter reveal kicks in on long completed bot bubbles. Tuned so a
+// typical section (~800 chars) reveals in ~3 seconds — fast enough to
+// not feel laborious, slow enough to read "Layla is writing." Tap the
+// bubble to skip to the full text instantly.
+const TYPEWRITER_MIN_CHARS = 240;
+const TYPEWRITER_TARGET_DURATION_MS = 3000;
+const TYPEWRITER_MIN_DURATION_MS = 900;
+const TYPEWRITER_MAX_DURATION_MS = 4500;
+
+// Module-scope ID sets so component re-mounts (list virtualization, key
+// reuse) don't replay the typewriter. Once a message has been streamed
+// OR fully revealed once, it stays settled forever.
+const STREAMED_BUBBLE_IDS = new Set<string>();
+const REVEALED_BUBBLE_IDS = new Set<string>();
+
 // The chart-sigil bubble emitted right after onboarding ("Avi — your
 // chart's ready. ☀ Aries Sun · ☾ Leo Moon · …") crosses the 220-char
 // threshold from sign names alone, so the Listen pill rendered on it.
@@ -167,19 +182,43 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
     ? () => onLongPressShare!(text)
     : undefined;
 
+  // Typewriter reveal for completed long bubbles (first-map sections,
+  // long chat replies that didn't stream). Disabled for sigil bubbles
+  // (planet-symbol writing-out reads as junk) and for anything that
+  // already streamed (the stream IS the reveal).
+  const typewriterEligible =
+    !message.streaming
+    && text.length >= TYPEWRITER_MIN_CHARS
+    && !isChartSigilBubble(text);
+  const { revealed, isRevealing, skip } = useTypewriter(
+    text,
+    message.id,
+    typewriterEligible,
+    !!message.streaming,
+  );
+  // Tap-to-skip is wired to the same outer Pressable used for share.
+  // While revealing, plain tap skips. After revealing, plain tap is a
+  // no-op (long-press still handles share where eligible).
+  const handlePress = isRevealing ? skip : undefined;
+
   return (
     <Animated.View
       testID={message.streaming ? "bubble-bot-streaming" : "bubble-bot"}
       style={[styles.row, { opacity: fade, transform: [{ translateY: lift }] }]}
     >
       <Pressable
+        onPress={handlePress}
         onLongPress={handleLongPress}
         delayLongPress={550}
-        // Plain tap stays a no-op so we don't accidentally fire on
-        // brushes; only long-press triggers the share affordance.
-        disabled={!shareEligible}
+        // Plain tap is a no-op except while typewriting (skip). Long
+        // press handles share when eligible. We never `disabled` the
+        // pressable so the typewriter-skip can always fire.
         accessibilityHint={
-          shareEligible ? "Long press to share this reading as a card" : undefined
+          isRevealing
+            ? "Tap to reveal the full message"
+            : shareEligible
+              ? "Long press to share this reading as a card"
+              : undefined
         }
         style={[styles.botRow, isRTL && styles.botRowRTL]}
       >
@@ -210,6 +249,15 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
                 {text}
                 <Text style={styles.caret}>▍</Text>
               </Text>
+            ) : isRevealing ? (
+              // Typewriter reveal in progress. Render plain Text with a
+              // caret so partial markdown (mid-heading, mid-bold) doesn't
+              // render as broken syntax. When the reveal finishes, this
+              // branch falls through to the Markdown render below.
+              <Text style={[styles.botText, isRTL && styles.textRTL]}>
+                {revealed}
+                <Text style={styles.caret}>▍</Text>
+              </Text>
             ) : (
               // Completed bot message: render markdown so GPT's natural
               // headers (`### Sun in Pisces`), bold (`**term**`), and
@@ -228,6 +276,7 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
             )
           ) : null}
           {!message.streaming
+            && !isRevealing
             && text.length >= PLAY_BUTTON_MIN_CHARS
             && !isChartSigilBubble(text) ? (
             <ActionBar text={text} />
@@ -499,6 +548,90 @@ function ActionButton({
       {children}
     </Pressable>
   );
+}
+
+/**
+ * Typewriter reveal for a completed bot bubble. Returns the
+ * progressively-revealed text + a `skip` function that jumps to the
+ * end. Idempotent across re-mounts — once `messageId` has been
+ * revealed once, future calls return the full text immediately.
+ *
+ * `wasStreaming` short-circuits the reveal for bubbles that have
+ * already streamed in token-by-token — the LLM stream IS the reveal
+ * for those, no need to re-animate after the streaming caret turns off.
+ */
+function useTypewriter(
+  text: string,
+  messageId: string,
+  enabled: boolean,
+  wasStreaming: boolean,
+): { revealed: string; isRevealing: boolean; skip: () => void } {
+  // If this bubble streamed (now or in any past render), it stays
+  // settled — the user already watched it appear.
+  if (wasStreaming) STREAMED_BUBBLE_IDS.add(messageId);
+
+  const shouldReveal =
+    enabled &&
+    !STREAMED_BUBBLE_IDS.has(messageId) &&
+    !REVEALED_BUBBLE_IDS.has(messageId);
+
+  const [revealed, setRevealed] = useState<string>(() =>
+    shouldReveal ? "" : text,
+  );
+  const skipRef = useRef(false);
+
+  useEffect(() => {
+    if (!shouldReveal) {
+      setRevealed(text);
+      return;
+    }
+    REVEALED_BUBBLE_IDS.add(messageId);
+    skipRef.current = false;
+
+    // Duration scales with length but stays inside the readable band.
+    // ~3.75ms/char baseline → 800 chars in 3s.
+    const duration = Math.min(
+      TYPEWRITER_MAX_DURATION_MS,
+      Math.max(TYPEWRITER_MIN_DURATION_MS, text.length * 3.75),
+    );
+    // Clamp to TARGET if length exceeds it so super-long bubbles still
+    // wrap within ~3-3.5s — readers should not have to wait > 5s for
+    // a bubble to settle.
+    const totalDuration = Math.min(duration, TYPEWRITER_TARGET_DURATION_MS + 1500);
+    const start = Date.now();
+    let rafId = 0;
+
+    const tick = () => {
+      if (skipRef.current) {
+        setRevealed(text);
+        return;
+      }
+      const elapsed = Date.now() - start;
+      const progress = Math.min(1, elapsed / totalDuration);
+      // Ease-out so the reveal slows toward the end — feels deliberate
+      // rather than mechanical.
+      const eased = 1 - Math.pow(1 - progress, 1.6);
+      const len = Math.floor(text.length * eased);
+      setRevealed(text.slice(0, len));
+      if (progress < 1) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        setRevealed(text);
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messageId, shouldReveal]);
+
+  return {
+    revealed,
+    isRevealing: revealed.length < text.length,
+    skip: () => {
+      skipRef.current = true;
+      setRevealed(text);
+    },
+  };
 }
 
 function stripHtml(s: string): string {
