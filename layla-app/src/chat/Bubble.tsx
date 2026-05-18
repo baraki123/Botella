@@ -1,7 +1,9 @@
+import * as Clipboard from "expo-clipboard";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Image, Platform, Pressable, Share, StyleSheet, Text, View } from "react-native";
 // @ts-ignore — no shipped types
 import Markdown from "react-native-markdown-display";
+import Svg, { Path } from "react-native-svg";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
@@ -223,7 +225,7 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
           {!message.streaming
             && text.length >= PLAY_BUTTON_MIN_CHARS
             && !isChartSigilBubble(text) ? (
-            <PlayButton text={text} />
+            <ActionBar text={text} />
           ) : null}
         </View>
       </Pressable>
@@ -232,12 +234,98 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
 }
 
 
-// ─── ▶ Listen affordance ──────────────────────────────────────────────────
+// ─── Message action bar ───────────────────────────────────────────────────
 //
-// Renders a small gold play/pause control under long bot bubbles. State
-// is owned by the playback module so multiple bubbles correctly reflect
-// "this one is playing right now". Tap-to-stop on the active bubble;
-// tap on a different bubble stops the active one and starts this one.
+// Renders a row of gold icon buttons under each substantial Layla bubble —
+// like the action row under a ChatGPT message. Order: Copy · Listen · 👍 ·
+// 👎 · Share. Listen keeps its label + visible state ("Playing…", "Loading…")
+// because the user needs to know whether their tap took. The other actions
+// fire-and-confirm via short toast-style "Copied" / "Thanks" labels that
+// fade out after ~1.4s.
+
+const ICON_SIZE = 17;
+const ICON_STROKE = 1.7;
+
+function CopyIcon({ color }: { color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M5 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+function ThumbsUpIcon({ filled, color }: { filled: boolean; color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 22V11M2 13v7a2 2 0 0 0 2 2h13.5a3 3 0 0 0 2.95-2.46l1.4-7A3 3 0 0 0 18.9 9H14V5a3 3 0 0 0-3-3l-4 9"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill={filled ? color : "none"}
+        fillOpacity={filled ? 0.18 : 0}
+      />
+    </Svg>
+  );
+}
+
+function ThumbsDownIcon({ filled, color }: { filled: boolean; color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M17 2v11M22 11V4a2 2 0 0 0-2-2H6.5a3 3 0 0 0-2.95 2.46l-1.4 7A3 3 0 0 0 5.1 15H10v4a3 3 0 0 0 3 3l4-9"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill={filled ? color : "none"}
+        fillOpacity={filled ? 0.18 : 0}
+      />
+    </Svg>
+  );
+}
+
+function ShareIcon({ color }: { color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3v13M8 7l4-4 4 4M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+function PlayGlyph({ playing }: { playing: boolean }) {
+  // Solid play/pause glyph in gold. Used inline next to the "Listen" /
+  // "Playing…" label so state is visible at a glance.
+  return playing ? (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24">
+      <Path d="M6 4h4v16H6zM14 4h4v16h-4z" fill={theme.accent} />
+    </Svg>
+  ) : (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24">
+      <Path d="M7 4v16l13-8Z" fill={theme.accent} />
+    </Svg>
+  );
+}
 
 function playButtonLabel(playing: boolean, busy: boolean, errLabel: string | null): string {
   if (playing) return "Playing…";
@@ -246,15 +334,18 @@ function playButtonLabel(playing: boolean, busy: boolean, errLabel: string | nul
   return "Listen";
 }
 
+type Vote = "up" | "down" | null;
 
-function PlayButton({ text }: { text: string }) {
+function ActionBar({ text }: { text: string }) {
   const cacheKey = useMemo(() => bubbleCacheKey(text), [text]);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Last error surfaced on the button label so failures don't go
-  // silent — better to show "TTS error" than have the user wonder
-  // why nothing's happening. Cleared on the next successful tap.
   const [errLabel, setErrLabel] = useState<string | null>(null);
+  const [vote, setVote] = useState<Vote>(null);
+  // Brief confirmation label ("Copied", "Thanks", "Noted") that fades
+  // in next to the action row, then fades out ~1.4s later. Keeps the
+  // bar from needing toasts or modal feedback.
+  const [confirm, setConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribePlaybackState((activeKey) => {
@@ -263,7 +354,14 @@ function PlayButton({ text }: { text: string }) {
     return unsubscribe;
   }, [cacheKey]);
 
-  const onPress = async () => {
+  // Auto-clear the transient confirmation chip.
+  useEffect(() => {
+    if (!confirm) return;
+    const t = setTimeout(() => setConfirm(null), 1400);
+    return () => clearTimeout(t);
+  }, [confirm]);
+
+  const onListen = async () => {
     if (busy) return;
     setErrLabel(null);
     const enabled = await getVoicePlaybackEnabled();
@@ -288,19 +386,112 @@ function PlayButton({ text }: { text: string }) {
     }
   };
 
+  const onCopy = async () => {
+    try {
+      await Clipboard.setStringAsync(text);
+      setConfirm("Copied");
+    } catch (e) {
+      console.warn("[copy] failed", e);
+      setConfirm("Copy failed");
+    }
+  };
+
+  const onShare = async () => {
+    try {
+      await Share.share(
+        Platform.OS === "ios" ? { message: text } : { message: text, title: "From Layla" },
+      );
+    } catch (e) {
+      // user-cancelled share counts as a no-op; iOS throws on dismiss
+      console.warn("[share] failed/cancelled", e);
+    }
+  };
+
+  const onVote = (next: Exclude<Vote, null>) => {
+    // Toggle off when re-tapping the same vote.
+    const final = vote === next ? null : next;
+    setVote(final);
+    if (final === "up") setConfirm("Thanks");
+    else if (final === "down") setConfirm("Noted");
+    else setConfirm(null);
+    // TODO(brain): when a feedback endpoint lands, POST {vote: final, text-hash}.
+    // For now the local state + console signal is enough to design around.
+    console.log("[feedback]", final, cacheKey);
+  };
+
+  const listenLabel = playButtonLabel(playing, busy, errLabel);
+  const goldDim = theme.accent;
+
+  return (
+    <View style={styles.actionRow}>
+      <ActionButton accessibilityLabel="Copy message" onPress={onCopy}>
+        <CopyIcon color={goldDim} />
+      </ActionButton>
+
+      <Pressable
+        onPress={onListen}
+        accessibilityRole="button"
+        accessibilityLabel={playing ? "Stop playback" : "Listen to this reading"}
+        accessibilityState={{ busy, selected: playing }}
+        style={({ pressed }) => [
+          styles.listenButton,
+          (playing || busy) && styles.listenButtonActive,
+          pressed && { opacity: 0.7 },
+        ]}
+      >
+        <PlayGlyph playing={playing} />
+        <Text style={styles.listenLabel}>{listenLabel}</Text>
+      </Pressable>
+
+      <ActionButton
+        accessibilityLabel="Good response"
+        onPress={() => onVote("up")}
+        selected={vote === "up"}
+      >
+        <ThumbsUpIcon filled={vote === "up"} color={goldDim} />
+      </ActionButton>
+
+      <ActionButton
+        accessibilityLabel="Bad response"
+        onPress={() => onVote("down")}
+        selected={vote === "down"}
+      >
+        <ThumbsDownIcon filled={vote === "down"} color={goldDim} />
+      </ActionButton>
+
+      <ActionButton accessibilityLabel="Share message" onPress={onShare}>
+        <ShareIcon color={goldDim} />
+      </ActionButton>
+
+      {confirm ? <Text style={styles.confirm}>{confirm}</Text> : null}
+    </View>
+  );
+}
+
+function ActionButton({
+  children,
+  onPress,
+  accessibilityLabel,
+  selected,
+}: {
+  children: React.ReactNode;
+  onPress: () => void;
+  accessibilityLabel: string;
+  selected?: boolean;
+}) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={playing ? "Stop playback" : "Listen to this reading"}
-      accessibilityState={{ busy, selected: playing }}
+      accessibilityLabel={accessibilityLabel}
       style={({ pressed }) => [
-        styles.playButton,
+        styles.iconButton,
+        selected && styles.iconButtonSelected,
         pressed && { opacity: 0.7 },
       ]}
+      hitSlop={4}
     >
-      <Text style={styles.playGlyph}>{playing ? "⏸" : "▶"}</Text>
-      <Text style={styles.playLabel}>{playButtonLabel(playing, busy, errLabel)}</Text>
+      {children}
     </Pressable>
   );
 }
@@ -426,32 +617,57 @@ const styles = StyleSheet.create({
     backgroundColor: "#15101A",
   },
   caret: { opacity: 0.5, color: theme.accent },
-  playButton: {
+  // ─── Action bar (copy · listen · 👍 · 👎 · share) ──────────────────────
+  actionRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    // align with the bubble's text inset; row hugs the leading edge.
     alignSelf: "flex-start",
-    gap: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginTop: 6,
-    borderRadius: 999,
-    borderWidth: 1,
+  },
+  iconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.borderStrong,
-    // Faint gold-tinted fill so the button reads as "Layla's voice" not a
-    // generic media control. Soft enough not to compete with the text
-    // it sits under.
+    backgroundColor: "rgba(212, 175, 90, 0.05)",
+  },
+  iconButtonSelected: {
+    backgroundColor: "rgba(212, 175, 90, 0.18)",
+    borderColor: theme.accent,
+  },
+  listenButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.borderStrong,
     backgroundColor: "rgba(212, 175, 90, 0.08)",
   },
-  playGlyph: {
-    color: theme.accent,
-    fontSize: 14,
-    lineHeight: 16,
+  listenButtonActive: {
+    borderColor: theme.accent,
+    backgroundColor: "rgba(212, 175, 90, 0.18)",
   },
-  playLabel: {
+  listenLabel: {
     color: theme.accent,
     fontSize: 13,
     fontWeight: "500",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
+  },
+  confirm: {
+    marginLeft: 6,
+    color: theme.accent,
+    fontSize: 12,
+    fontFamily: theme.fontSerif,
+    fontStyle: "italic",
+    opacity: 0.75,
   },
 });
 

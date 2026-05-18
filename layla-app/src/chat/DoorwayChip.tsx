@@ -142,7 +142,7 @@ export function DoorwayChip({
           <>
             <Coin pressed={pressed} primary={primary}>
               <GlyphComp
-                size={20}
+                size={16}
                 color={primary ? theme.doorCoinHi : theme.doorCoinGlyph}
               />
             </Coin>
@@ -192,7 +192,7 @@ function Coin({
       <Svg
         width={COIN}
         height={COIN}
-        viewBox="0 0 38 38"
+        viewBox="0 0 30 30"
         style={StyleSheet.absoluteFill}
       >
         <Defs>
@@ -203,15 +203,15 @@ function Coin({
           </RadialGradient>
         </Defs>
         <Circle
-          cx={19}
-          cy={19}
-          r={18.5}
+          cx={15}
+          cy={15}
+          r={14.6}
           fill={`url(#${primary ? "coinFillP" : "coinFill"})`}
         />
         <Circle
-          cx={19}
-          cy={19}
-          r={17}
+          cx={15}
+          cy={15}
+          r={13.4}
           stroke={primary ? "rgba(234,208,142,0.35)" : "rgba(0,0,0,0.18)"}
           strokeWidth={0.6}
           fill="none"
@@ -222,8 +222,11 @@ function Coin({
   );
 }
 
-const COIN = 38;
-const CHIP_H = 56;
+// Doorway chips are sized to match the generic chip rhythm — they sit
+// at the end of a long read; the coin medallion does the energy work,
+// not the chip bulk. (Earlier 56pt + 18.5px felt huge on the screen.)
+const COIN = 30;
+const CHIP_H = 46;
 
 const styles = StyleSheet.create({
   outer: {
@@ -235,10 +238,10 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 9,
     height: CHIP_H,
-    paddingLeft: 9,
-    paddingRight: 20,
+    paddingLeft: 8,
+    paddingRight: 16,
     borderRadius: 999,
     backgroundColor: theme.doorChipFillBot,
     borderWidth: StyleSheet.hairlineWidth,
@@ -300,14 +303,12 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   label: {
-    // Back to the brand gold (theme.chipText / theme.accent). The
-    // gold-coin medallion now carries the brightness; the label
-    // returns to the warm-gold brand voice. Size bumped to 18.5 so
-    // the chips are unmissable on a 40+ reader's first scan.
+    // Brand gold; the coin medallion does the energy lift, the label
+    // matches the rest-of-app chip rhythm (15.5 / 600).
     color: theme.chipText,
     fontFamily: theme.fontSerif,
-    fontSize: 18.5,
-    fontWeight: "700" as const,
+    fontSize: 15.5,
+    fontWeight: "600" as const,
     letterSpacing: 0.1,
     // Cochin sits slightly low on the baseline — nudge up so it
     // optically centers with the coin.
