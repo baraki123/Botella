@@ -86,10 +86,19 @@ interface Props {
  */
 export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }: Props) {
   const isUser = message.role === "user";
-  const isRTL = lang === "he";
   // Memoize per-bubble so streaming-token re-renders + chat-state
   // updates don't re-walk the regex chain on every paint of every row.
   const text = useMemo(() => stripHtml(message.text), [message.text]);
+  // Direction is per-bubble, not per-session. An English bot reply
+  // inside a Hebrew session was rendering RTL — gold dot on the right,
+  // text right-aligned, markdown headings flipped — because the
+  // previous check was `lang === "he"`. Detect Hebrew chars in THIS
+  // bubble's text instead. The `lang` prop is kept for the few
+  // structural fallbacks that still need it but no longer drives RTL.
+  const isRTL = useMemo(
+    () => /[֐-׿]/.test(text),
+    [text],
+  );
   // Image-only Layla messages render edge-to-edge (no gold dot, no
   // text-bubble padding) so the chart fills the chat width and feels
   // like a centerpiece, not a thumbnail tucked next to a paragraph.
