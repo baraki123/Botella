@@ -581,7 +581,16 @@ export function ChatScreen({
     // display that instead — caller controls which it wants by setting
     // value === label or value !== label.
     setMessages((m) => [...m, { id: uid(), role: "user", text: displayLabel }]);
-    streamRef.current?.send({ text: sendValue });
+    // `__`-prefixed chip values are also routed via callback_data so the
+    // brain's trigger system can intercept them (e.g.
+    // `callback:__doorway_person` → start add_person flow). Free-text
+    // chip values (yes/no, plain strings) are sent as text only.
+    const isCallback = sendValue.startsWith("__");
+    streamRef.current?.send(
+      isCallback
+        ? { text: sendValue, callback_data: sendValue }
+        : { text: sendValue },
+    );
   }
 
   function advancePaginatedRead() {

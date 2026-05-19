@@ -262,14 +262,12 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
               // Completed bot message: render markdown so GPT's natural
               // headers (`### Sun in Pisces`), bold (`**term**`), and
               // bulleted lists become properly styled instead of showing
-              // raw syntax characters. For Hebrew, layer an RTL-aware
-              // body style on top of the canonical markdownStyles.
+              // raw syntax characters. For Hebrew, apply RTL to every
+              // text-bearing markdown style — body alone wasn't enough
+              // for the chart-sigil bubble (tier headers, planet rows)
+              // and long sections (h2 titles, paragraphs, bullets).
               <Markdown
-                style={
-                  isRTL
-                    ? { ...markdownStyles, body: { ...markdownStyles.body, textAlign: "right", writingDirection: "rtl" } }
-                    : markdownStyles
-                }
+                style={isRTL ? rtlMarkdownStyles : markdownStyles}
               >
                 {text}
               </Markdown>
@@ -932,5 +930,52 @@ const markdownStyles = {
   link: {
     color: theme.accent,
     textDecorationLine: "underline" as const,
+  },
+};
+
+// ─── RTL variant ──────────────────────────────────────────────────────────
+//
+// For Hebrew bubbles, apply textAlign: "right" + writingDirection: "rtl"
+// to every text-bearing markdown style. Body alone wasn't enough for the
+// chart-sigil bubble (tier headers + planet rows mixed glyphs/numbers
+// with Hebrew text) and the deep-read sections (h2 titles, paragraphs,
+// bullets). RN's bidi algorithm handles mixed-direction text fine when
+// the container's primary direction is set per style.
+const _rtl = <T extends object>(s: T): T => ({
+  ...s,
+  textAlign: "right",
+  writingDirection: "rtl",
+}) as unknown as T;
+
+const rtlMarkdownStyles = {
+  ...markdownStyles,
+  body: _rtl(markdownStyles.body),
+  paragraph: _rtl(markdownStyles.paragraph),
+  heading1: _rtl(markdownStyles.heading1),
+  heading2: _rtl(markdownStyles.heading2),
+  heading3: _rtl(markdownStyles.heading3),
+  heading4: _rtl(markdownStyles.heading4),
+  blockquote: {
+    ...markdownStyles.blockquote,
+    // Mirror the left rule to the right edge for RTL.
+    borderLeftWidth: 0,
+    borderRightWidth: 2,
+    borderRightColor: theme.accentDim,
+    paddingLeft: 0,
+    paddingRight: 12,
+  },
+  list_item: {
+    ...markdownStyles.list_item,
+    flexDirection: "row-reverse" as const,
+  },
+  bullet_list_icon: {
+    ...markdownStyles.bullet_list_icon,
+    marginRight: 0,
+    marginLeft: 8,
+  },
+  ordered_list_icon: {
+    ...markdownStyles.ordered_list_icon,
+    marginRight: 0,
+    marginLeft: 8,
   },
 };
