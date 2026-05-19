@@ -52,7 +52,7 @@ const STRINGS = {
     offline: "Offline. Your messages will send when we're back.",
   },
   he: {
-    idle: "ספרי לליילה…",
+    idle: "ספרי ללילה…",
     recording: "מקשיבה…",
     transcribing: "מתמללת…",
     reconnecting: "מתחברת מחדש — אפשר להמשיך להקליד, ההודעות יישלחו.",

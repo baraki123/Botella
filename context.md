@@ -1,7 +1,7 @@
 # botella — handoff
 
 > A fresh Claude session can read this top-to-bottom and pick up the work
-> cold. Last updated 2026-05-12. If anything disagrees with the running
+> cold. Last updated 2026-05-13. If anything disagrees with the running
 > system, trust the system and update this file. The other authoritative
 > doc is `botella/spec.md` (current product spec). Core value:
 > *"we add value to the user."*
@@ -10,28 +10,91 @@
 
 ## 0. Where we are right now
 
-### Today's working state (2026-05-12)
+### Today's working state (2026-05-13 — picking up from 2026-05-12 night session)
 
-**Just shipped (commit `15a29c2` on `baraki123/Botella@main`):**
-- **Smart-snap scroll rule** in `useChatScroll.ts` (mobile-template + layla-app verbatim). Replaces always-scrollToEnd with Case A (fits → scrollToEnd) / Case B (overflows → anchor top one line below chrome). Verified Case B in the booted iPhone 16 Plus sim against the "Emotional Pattern" section reveal — the prior chip ("How you actually feel → 4/5") sits at the top as the one-line context anchor, then the new long bubble begins below it. Case A and the keyboard-rise re-snap path on the date prompt are not yet device-verified (next agent: run a fresh `/start` + describe_ui to confirm). Contract block at top of `useChatScroll.ts` is now the source of truth, including bulk-arrival bypass and "re-evaluate Case A/B on viewport shrink" notes.
-- **Spell-check on, autocorrect off** in `Composer.tsx` (both forks). Red squiggle helps with names/places; QuickType bar stays off so it doesn't clip the input.
+This stretch shipped 6 botella commits + 2 GombiStar commits across UX
+polish, a content-truncation bug fix, voice prefetch, and i18n. Every
+commit on this list is live in prod (Northflank auto-deploys GombiStar
+`main`; botella ships via Expo Metro hot-reload locally + EAS Update
+for users) unless flagged.
 
-**iOS dev environment now in place (a fresh agent will inherit this):**
-- Xcode (16.x) installed at `/Applications/Xcode.app`. CLT version 15.3 is still the old standalone — brew compiles refuse against it (it wants Xcode 26.3-era CLT), so any brew formula that builds from source against Apple toolchains will currently fail. None of our shipping path needs that; only `idb-companion` did, and we dropped idb in favor of XcodeBuildMCP.
-- One iOS Simulator runtime (iOS 18.6, iPhone 16 Plus, UDID `8BDE87D3-2C7E-4927-A02D-4ED9C48B7110`) is the canonical sim. The 10 other devices Xcode pre-created (Pro / Pro Max / 16e / 16 / 5 iPads) have been deleted to save space — recreate with `xcrun simctl create` if needed.
-- **XcodeBuildMCP** is registered (`claude mcp add XcodeBuildMCP -- npx -y xcodebuildmcp@latest mcp`) and showing ✓ Connected in `claude mcp list`. The 97 tools (`describe_ui`, `screenshot`, `tap`, `type`, `swipe`, `build_run_sim`, `log_sim`, etc.) are not yet visible to the agent in this session — they register on next session start. **A fresh agent inheriting this state can drive Layla in the simulator hands-off**, no user taps required. See CLAUDE.md → "MCP — XcodeBuildMCP" for the driving pattern.
-- AppleScript can send keystrokes to the booted simulator when something is focused (Accessibility permission granted to the terminal app hosting Claude Code) but cannot enumerate or compute coords for iOS UI — that's a hard macOS limit (iOS surfaces are Metal-rendered, AX-opaque). XcodeBuildMCP exists specifically to work around this.
+**Shipped today (in commit order):**
 
-**Live dev servers (kill before next session if you want a clean boot):**
-- Backend: `uvicorn bot_botella:app --port 8000` running from `~/Desktop/Coding/GombiStar` (bash task `by95x4c2l` in the previous session — may have been reaped).
-- Metro: `npx expo start --port 8081` from `layla-app/`. Layla is loaded into the iPhone 16 Plus Expo Go via deep-link `exp://127.0.0.1:8081`.
+| Repo / SHA | Title | Why it matters |
+|---|---|---|
+| botella `baa7559` | `chat: testID + accessibilityLabel on Composer, Bubble, chips` | XcodeBuildMCP + Playwright can now target chips by `chip-<wire-value>`, composer by `composer-input`, send/mic by `send-button`/`mic-button`, bubbles by `bubble-user` / `bubble-bot` / `bubble-bot-streaming`. Chips also gained `accessibilityRole="button"` so they read as proper AXButton in the snapshot tree. |
+| botella `b8ab3f4` | `chat: fix Case B smart-snap overshoot + suppress web focus outline` | (1) `quick_replies` events with an empty `prompt` now ATTACH to the previous bot bubble instead of creating a 0-height ghost message. That ghost was re-anchoring smart-snap to Case A (`scrollToEnd`) and overshooting past long section bubbles. (2) RN-Web's default blue `outline` on the textarea is suppressed; the amber `inputWrapFocused` border is the only focus cue. |
+| GombiStar `2731d40` (live as `df0511a`) | `onboarding: stop duplicating section bubble on WS resume` | `emit_first_map` now dedups the outbound `text()` event when `reading_history[-1] == section_text`. Earlier WS reconnects re-emitted the current section's bubble on every drop (observed: same Emotional Pattern repeating 6× after several debug reconnects). Chip still goes out so the user can advance. |
+| botella `a473fca` | `chat: Hebrew composer + RTL bubble flip + cross-reload chat persistence` | Three bugs in one commit. (a) BUG-5: Composer placeholder + status banner now translate via a `STRINGS` dict keyed by `lang`. (b) BUG-6: Bot bubble in he flips `flexDirection: row-reverse` so the gold dot leads at the right edge; user pill anchors LEFT (native RTL convention); Markdown overlays an RTL body style. (c) BUG-4: ChatScreen persists the message tail (cap 60, debounced 500ms, mid-stream filtered) to AsyncStorage keyed `layla:chat_messages:${userId}`. Hydrates on mount before WS auto-resume. SettingsScreen wipes per-user keys on Sign out + Delete account. **`lang` detection is a regex sniff** of the last 10 message texts for Hebrew code points — a stopgap until the server pushes a `session_meta` frame. |
+| GombiStar `4dbfb75` | `first-map: bump max_completion_tokens 3000 → 6500 to stop mid-stream cuts` | Reasoning models budget reasoning + output from the same cap. Medium effort ate ~2000 tokens of the 3000 cap, starving the 1800-2400 word output spec. Heavy charts terminated mid-sentence at 3282 chars / 3 sections (vs target 13-15k chars / 9 sections). Bump to 6500 gives 3000+ output tokens of headroom. Latency: 75s → 127s for the full 9-section stream, but Section 1 still surfaces at ~71s (streaming pagination unchanged), so felt latency for the first read beat is the same. Verified live (Avi chart): `stream complete in 126.6s (13796 chars) → saved 9 full sections`. |
+| botella `951e37a` | `tts: prefetch the latest long bubble's audio so Listen taps are instant` | When voice playback is enabled in Settings, ChatScreen fires `prefetchAudio({ text, jwt })` on the latest finished long bot bubble. The fetched blob/file URL lands in the same LRU cache `togglePlay` reads from, so the user's tap is instant instead of paying the ~22s synth wait. Idempotent (no-op if cached or in-flight), error-silent (togglePlay still surfaces failures if user actually taps). `PLAY_BUTTON_MIN_CHARS` is now exported from Bubble. |
 
-**Disk:** ~9 GB free on the data volume after this session's cleanup pass (was at 100% / 126 MB free at session start). Freed: ~10 GB across `~/Downloads/*.dmg`, `~/Library/Caches/*`, brew downloads, and 10 unused simulator devices.
+**Verified end-to-end on the running web build (Playwright):**
 
-**Open follow-ups for the next agent:**
-1. Restart the Claude Code session so XcodeBuildMCP's tools register. Then run a fresh `/start` in the booted sim using `describe_ui` + `tap` + `type` to verify smart-snap Case A (short prompt fully above keyboard) and the keyboard-rise re-snap on the date prompt specifically — these are the cases we did not get to device-verify before shipping.
-2. Add `accessibilityLabel` / `testID` to the Composer `TextInput`, Send/Mic buttons, Bubble container, doorway chips so XcodeBuildMCP doesn't have to guess at coords.
-3. If you want users to see smart-snap, cut an EAS Update (JS-only OTA) — the change is JS-only, no native rebuild needed. Locally it's already live in the dev sim and web build.
+- Onboarding lang → name → gender → date → time → city → chart sigils → 9-section first map read (all sections lands).
+- Hebrew flow: עברית chip → Hebrew greeting RTL-aligned with gold dot on right; user pill "עברית" on left; composer placeholder "ספרי ללילה…"; gender chips "👦 זכר" + "👧 נקבה".
+- TTS path: ▶ Listen → ▶ Loading… → ⏸ Playing… → tap to stop → ▶ Listen restored. Voice toggle off → "Voice off (Settings)" fallback label.
+- Smart-snap Case B: Executive Summary header lands at viewport top after Continue tap; chip attached to the section bubble; no ghost row.
+- Chat persistence: 6-message Hebrew thread survived a full page reload verbatim (`localStorage` key `layla:chat_messages:${userId}` confirmed).
+- Settings: Sign out clears cache, redirects to Welcome, fresh anon session on next load.
+- XcodeBuildMCP `snapshot_ui` returns the iPhone 16 Plus chat with `AXUniqueId: "composer-input"`, `chip-<value>`, `mic-button`, etc.
+
+**User-POV rubric — full sweep on 2026-05-13 (commit GombiStar `5fb11e5`):**
+
+| # | Scenario | Score | Screenshot? | Note |
+|---|---|---|---|---|
+| 1 | First-map "be seen" | 17/20 | Y | (05-12 baseline) "Courage to be fully seen while staying tender." Att 4 / Help 4 / Voice 5 / Cont 4. |
+| 2 | Decision moment | 19/20 | N | Both paths' costs named honestly. Closes with "Will this choice make you more vital, present, and awake?" — a real question. Slightly chart-dense (4 placements vs rubric's "one specific bit"); each lands, but Voice 4/5 for density. |
+| 3 | Communication help (mom) | 20/20 | N | Draft IS the centerpiece ("Try this: 'Hey Mom, I wanted to let you know I'll be coming home for a shorter visit this year…'") + one "why it lands" beat. One observational sentence of context before the draft, no chart lecture, no multiple drafts. Bonus: Orbit-add chip surfaces after as a low-pressure discoverability hook. **Locked-in PASS.** |
+| 4 | "Hold me" emotional dump | 20/20 | Y | (05-12 baseline) "I'm here with you in that. You don't have to figure out the reason right now." **Locked-in PASS.** |
+| 5 | Astrology depth (pattern) | **16 → 20** | Y | **Regression fixed by `5fb11e5`.** Old reply emitted `What to pay attention to:` + dot-bullets. New reply collapses the same content into prose: 3 stellium paragraphs + a single prose synthesis ("If you pay attention to these centers—relationship (7th), vision (11th), inner renewal (12th)—the rest of your chart starts to move again. When you feel frozen, ask which one is most depleted.") + closing Q. No bullets, no labels. Screenshot: `screenshots/userpov-05-stellium-prose-fix.png`. |
+| 6 | Person mention (Maya, no add-intent) | 20/20 | N | "That sounds unsettling. Do you want to tell me what happened, or how it left you feeling?" — 2 sentences, ONE open question, no astrology speculation, **Add Maya** chip surfaces AFTER the reply. **Locked-in PASS.** |
+| 7 | Off-domain "capital of France" | 20/20 | Y | (05-12 baseline) **Locked-in PASS.** |
+| 8 | Articulation ("no words…off") | 20/20 | N | "Here are a few words you might try on: untethered, muted, foggy, adrift, or like you're hovering just outside yourself." Offers 5 candidates incl. somatic ("hovering just outside yourself"); closes with "Do any of these come close, or is it still more of a blank space?" No chart pivot. **Locked-in PASS.** |
+| 9 | Anchor-question continuity | **~16/20 ⚠** | N | Seeded `"I keep choosing the safer path even when I know it shrinks me"` one turn before sending the procrastination test. Procrastination reply was substantive on its own but did **not** thread the seeded anchor back. Likely a timing race — `schedule_moment_update` (fire-and-forget) probably hadn't written `current_moment.anchor_questions` before the next dispatch fetched the record. **See follow-up #1 below.** |
+| 10 | Bystander counter-test ("Tell me about my Moon sign") | 20/20 | Y | Directly answers Moon-in-Leo-in-3rd; no callback to the seeded anchor. The counter-test of #9. Screenshot: `screenshots/userpov-10-moonsign-no-anchor-leak.png`. **Locked-in PASS.** |
+
+Net: **6 PASS + 1 locked-in regression-fixed PASS + 1 anchor-threading timing issue to investigate**. The S5 fix is the headline win of the day.
+
+**Method note for future runs:** clean state matters. The fresh-backend WS auto-resume re-emits the checkin opener and that interacts with persisted localStorage in ways that confuse the Playwright DOM (FlatList rendered the first 50 of 60 messages, so newly-arrived bot replies were invisible). The cleanest path is `localStorage.removeItem('layla:chat_messages:<uid>')` → reload → run scenarios. Chart + LivingMap + chat_history live in `layla_user_records.data` (server-side); only the on-device tail is in localStorage.
+
+**Screenshots captured today:** `screenshots/userpov-05-stellium-prose-fix.png` (the headline regression fix) and `screenshots/userpov-10-moonsign-no-anchor-leak.png`. The 05-09 baseline shots for #1/#2/#3/#4/#7/#8 still apply.
+
+---
+
+### 🔴 Hot follow-ups for the next agent
+
+1. **S9 anchor-threading timing race.** Seed `"I keep choosing the safer path even when I know it shrinks me"` → next turn `"I keep procrastinating on this big move I want to make"` did NOT get an anchor callback. Hypothesis: `schedule_moment_update` (fire-and-forget in `botella_manifest.py:free_chat` step 5) hadn't written `current_moment.anchor_questions` before the next free_chat dispatch fetched the record. Two cheap fixes to consider: (a) in `services/laila_chat.py:remember_anchor_question`, write synchronously (not via background task) when the user message has explicit anchor-marker phrasing ("I keep…", "Why do I always…"); (b) await the moment-update task in free_chat with a short timeout (e.g. 1.5s) before fetching `record` for the dispatch chain. Verify by re-running the S9 seed→test pair after the fix. Counter-test S10 (Moon-sign) must still NOT thread.
+
+2. **Per-call token logging** — user asked for cost visibility; the cheap move is a 10-line change in `services/llm.py:_create_message` to log `response.usage.completion_tokens / prompt_tokens / model / tier` plus the calling function name. Then grep the log for "first_map cost today = $X". **Not yet shipped.**
+
+3. **FlatList virtualization showing first-50 of 60 messages.** During the rubric run, the React UI rendered the FIRST 50 chat-history items from localStorage (60 total after cap) — meaning newly-arrived replies at idx 50+ never reached the DOM until I wiped + reloaded. Either: (a) `messages.slice(0, 50)` is in ChatScreen by mistake, (b) FlatList's `initialNumToRender=50` + `windowSize=50` is leaving the tail unmounted on the wrong end (inverted-list mis-orientation?), or (c) the render keying is hitting a stale-key collision. Not blocking — local-only annoyance, but a real bug if a returning user with >50 messages ever sees stale-tail rendering in prod.
+
+4. **`lang` propagation, proper fix** — client-side Hebrew detection is a regex stopgap. The clean version is a `session_meta` WS frame emitted on connect (`{ type: "session_meta", payload: { lang: "he", name: "...", ... } }`) that iOS stores in ChatScreen state and passes to Composer + Bubble. Would also unlock other UX moves (showing the user's name in the header, etc.). Not blocking — current regex works.
+
+5. **Keyboard-rise re-snap on the iOS date prompt** — still not device-verified. XcodeBuildMCP AX taps don't focus RN multiline TextInput reliably (synthetic AX taps don't propagate to the gesture responder for keyboard focus). The web evidence proves the smart-snap math is correct; a manual user tap on the iOS sim is the missing confirmation.
+
+6. **Chart-image bubble** (S25/S32 in the UX/UI plan) was not emitted during today's onboarding run. Check whether `botella/contract.py:media()` is being called in the chart-build path; if it's gated off, decide whether to ship the rendered chart PNG.
+
+7. **Pending uncommitted edits in working tree** (not mine, do not commit unless asked): `CLAUDE.md`, `context.md` (this file), untracked `barak_natal_chart.json`, `barak_natal_report.md`, `screenshots/`, `slashcommands_futuremigrate.md`, GombiStar `.mcp.json` (Telegram env vars removed by user).
+
+---
+
+### Live dev servers (will die with this session)
+
+- **Backend:** `LAYLA_DISABLE_SCHEDULER=1 uvicorn bot_botella:app --host 127.0.0.1 --port 8000` from `~/Desktop/Coding/GombiStar` (was bash task `bi86nxvj0`; logs at `/tmp/layla-backend.log`). **Restart after the OpenAI quota is topped up** — uvicorn isn't running with `--reload`, so any `services/` edits won't apply until restart.
+- **Metro:** `npx expo start --port 8081` from `layla-app/` (was bash task `bfvrz9o09`; logs at `/tmp/expo-metro.log`). Web build at `http://localhost:8081`. Metro hot-reloads on file save, so JS changes in `layla-app/src/` go live immediately.
+
+### Sim state at end of session
+
+iPhone 16 Plus (UDID `8BDE87D3-2C7E-4927-A02D-4ED9C48B7110`) is booted with Expo Go open at the language prompt of a fresh anon user. The previous Avi-chart conversation is on the **web** localStorage (`layla:chat_messages:456d17fb-c633-4c89-8cb8-714bfc731833`), not the sim. To resume the rubric mid-conversation: `xcrun simctl openurl 8BDE87D3-2C7E-4927-A02D-4ED9C48B7110 exp://127.0.0.1:8081` after restoring backend + Metro.
+
+### iOS dev environment (inherited intact from 2026-05-12)
+
+- Xcode 16.x at `/Applications/Xcode.app`. CLT 15.3 (old standalone) — brew builds-from-source against Apple toolchains fail. None of our shipping path needs that.
+- One iOS Simulator runtime (iOS 18.6, iPhone 16 Plus). The 10 other devices Xcode pre-created have been deleted to save disk.
+- XcodeBuildMCP registered with `XCODEBUILDMCP_ENABLED_WORKFLOWS=simulator,ui-automation`. After today's session set `session_set_defaults` to `simulatorId: 8BDE87D3-...`; that persists for new sessions in `~/.claude.json`.
+- AppleScript can send keystrokes to the booted simulator when something is focused, but cannot enumerate iOS UI (Metal-rendered, AX-opaque from macOS). XcodeBuildMCP exists to work around that.
 
 ---
 
