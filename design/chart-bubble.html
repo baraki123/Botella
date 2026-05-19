@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Layla — Chart Bubble · Design Study</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* Brand palette — exact theme tokens from layla-app/src/config/theme.ts */
+    --canvas-0:    #0e070b;
+    --canvas-1:    #15101A;          /* theme.bg */
+    --canvas-2:    #1E1623;          /* theme.surface */
+    --canvas-3:    #241A2C;          /* theme.surfaceRaised */
+    --gold:        #D4A574;          /* theme.accent */
+    --gold-bright: #ead08e;
+    --gold-soft:   #9C7A57;          /* theme.accentDim */
+    --gold-dim:    #5C4338;          /* theme.accentSoft */
+    --cream:       #F5EAE3;          /* theme.text */
+    --cream-soft:  #A99B95;          /* theme.textSubtle */
+    --rim:         rgba(212,165,116,0.22);
+    --rim-hi:      rgba(234,208,142,0.55);
+
+    --serif: 'Cormorant Garamond', 'Cochin', 'Iowan Old Style', Georgia, serif;
+    --display: 'Fraunces', 'Cormorant Garamond', Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--canvas-0);
+    color: var(--cream);
+    font-family: var(--serif);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  body::before {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(60% 50% at 50% 30%, rgba(140,90,70,0.10), transparent 70%),
+      radial-gradient(80% 60% at 50% 100%, rgba(40,20,30,0.6), transparent 60%);
+  }
+  body::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.85  0 0 0 0 0.75  0 0 0 0 0.55  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    mix-blend-mode: screen;
+    opacity: .55;
+  }
+
+  .stage {
+    position: relative; z-index: 1;
+    max-width: 1240px; margin: 0 auto;
+    padding: 64px 40px 96px;
+    display: grid; grid-template-columns: 1fr; gap: 48px;
+  }
+
+  /* header */
+  .header { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; }
+  .wordmark {
+    font-family: var(--display);
+    font-style: italic;
+    font-weight: 500;
+    font-size: 48px;
+    letter-spacing: -0.01em;
+    color: var(--cream);
+  }
+  .wordmark::after {
+    content: '';
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--gold);
+    margin-left: 14px; margin-bottom: 7px;
+    vertical-align: middle;
+    box-shadow: 0 0 14px rgba(212,165,116,0.6);
+  }
+  .crumb {
+    font-family: var(--serif); font-size: 13px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--cream-soft); font-weight: 500;
+  }
+  .crumb b { color: var(--gold); font-weight: 600; }
+
+  /* comparison grid */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: start;
+  }
+  @media (max-width: 980px) { .compare { grid-template-columns: 1fr; } }
+
+  .col-head {
+    margin-bottom: 22px;
+  }
+  .col-tag {
+    font-family: var(--serif); font-size: 12px; letter-spacing: 0.24em;
+    text-transform: uppercase; color: var(--gold); font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .col-title {
+    font-family: var(--display); font-style: italic; font-weight: 400;
+    font-size: 28px; line-height: 1.15; color: var(--cream);
+    letter-spacing: -0.01em;
+  }
+  .col-blurb {
+    font-family: var(--serif); font-size: 15px; line-height: 1.6;
+    color: var(--cream-soft); margin: 12px 0 0; max-width: 460px;
+  }
+
+  /* phone mockup */
+  .phone {
+    width: 100%; max-width: 420px;
+    background: var(--canvas-1);
+    border-radius: 38px;
+    border: 1px solid rgba(212,165,116,0.10);
+    padding: 24px 18px 22px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.02);
+    position: relative;
+  }
+  .status {
+    display: flex; justify-content: space-between;
+    font-family: var(--serif); font-size: 12px; color: var(--cream-soft);
+    margin-bottom: 18px; font-weight: 500;
+  }
+  .botname {
+    font-family: var(--display); font-style: italic; font-weight: 500;
+    font-size: 26px; color: var(--cream); margin-bottom: 16px;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .botname::before {
+    content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--gold);
+    display: inline-block; transform: translateY(-3px);
+    box-shadow: 0 0 10px rgba(212,165,116,0.55);
+  }
+
+  /* The bubble — Layla's text on canvas, no bubble pill */
+  .botbubble {
+    display: flex; gap: 12px; align-items: flex-start;
+    margin-bottom: 22px;
+  }
+  .botdot {
+    width: 6px; height: 6px; border-radius: 3px;
+    background: var(--gold);
+    margin-top: 11px;
+    box-shadow: 0 0 6px rgba(212,165,116,0.55);
+    flex-shrink: 0;
+  }
+  .botcontent { flex: 1; min-width: 0; }
+
+  /* ───────── A: Typographic — manuscript ───────── */
+
+  /* Lead-in: "Barak — here's your map." */
+  .lead {
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.4;
+    color: var(--cream);
+    margin: 0 0 18px;
+  }
+  .lead b {
+    font-family: var(--display);
+    font-style: italic; font-weight: 500;
+    color: var(--gold-bright);
+    font-size: 23px;
+    letter-spacing: 0.01em;
+  }
+  .lead em {
+    font-style: italic; color: var(--cream-soft);
+    font-weight: 400; font-size: 17px;
+  }
+
+  /* Tier wrapper */
+  .tier {
+    margin: 0 0 14px;
+  }
+  .tier-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+    color: var(--gold-soft);
+  }
+  .tier-head .line {
+    flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--gold-soft) 0%, rgba(156,122,87,0.0) 100%);
+  }
+  .tier-head .label {
+    font-family: var(--serif); font-size: 10px;
+    letter-spacing: 0.34em;
+    text-transform: uppercase; color: var(--gold);
+    font-weight: 600;
+  }
+  .tier-head .ornament {
+    color: var(--gold); font-size: 11px;
+    transform: translateY(-1px);
+  }
+
+  /* Each planet row: glyph | name+sign | house */
+  .row {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 4px;
+  }
+  .row .glyph {
+    font-family: 'Cormorant Garamond', serif;
+    color: var(--gold);
+    font-size: 18px;
+    text-align: center;
+    line-height: 1;
+  }
+  .row .sign {
+    font-family: var(--serif);
+    font-size: 17px;
+    color: var(--cream);
+    line-height: 1.25;
+  }
+  .row .sign b {
+    font-family: var(--display);
+    font-style: italic; font-weight: 500;
+    color: var(--gold-bright);
+    font-size: 18px;
+    margin-right: 6px;
+    letter-spacing: 0.005em;
+  }
+  .row .sign .planet-name {
+    color: var(--cream-soft);
+    font-size: 14px;
+    font-style: italic;
+  }
+  .row .house {
+    font-family: var(--serif);
+    font-size: 11.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold-soft);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .row .house b {
+    color: var(--gold);
+    font-weight: 600;
+  }
+
+  /* Closing flourish */
+  .flourish {
+    display: flex; justify-content: center; align-items: center;
+    gap: 12px; margin: 16px 0 4px;
+    color: var(--gold-soft);
+  }
+  .flourish .line {
+    width: 60px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold-soft), transparent);
+  }
+  .flourish .dot {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 6px rgba(212,165,116,0.55);
+  }
+
+  /* ───────── B: Wheel + typographic ───────── */
+
+  .wheel-wrap {
+    display: flex; justify-content: center;
+    margin: 4px 0 22px;
+  }
+  .wheel {
+    width: 268px; height: 268px;
+    position: relative;
+  }
+  .wheel svg { width: 100%; height: 100%; display: block; }
+
+  /* ───────── Annotations on the right ───────── */
+
+  .notes {
+    background: var(--canvas-2);
+    border: 1px solid rgba(212,165,116,0.08);
+    border-radius: 16px;
+    padding: 24px 26px;
+    margin-top: 22px;
+  }
+  .notes h3 {
+    font-family: var(--display); font-style: italic; font-weight: 500;
+    font-size: 18px; margin: 0 0 12px;
+    color: var(--gold);
+  }
+  .notes ul {
+    margin: 0; padding: 0; list-style: none;
+  }
+  .notes li {
+    font-family: var(--serif); font-size: 14px; line-height: 1.6;
+    color: var(--cream-soft); margin-bottom: 8px;
+    padding-left: 18px; position: relative;
+  }
+  .notes li::before {
+    content: '·'; color: var(--gold);
+    position: absolute; left: 6px; top: -2px;
+    font-size: 22px;
+  }
+  .notes li b { color: var(--cream); font-weight: 600; }
+  .notes code {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.85em; color: var(--gold-bright);
+    background: rgba(0,0,0,0.35); padding: 1px 6px; border-radius: 3px;
+  }
+
+  /* Bottom recommendation strip */
+  .rec {
+    background: linear-gradient(170deg, var(--canvas-2), var(--canvas-1));
+    border: 1px solid rgba(212,165,116,0.14);
+    border-radius: 18px;
+    padding: 36px 40px;
+    position: relative;
+  }
+  .rec::before {
+    content: ''; position: absolute; left: 30px; right: 30px; top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(234,208,142,0.45), transparent);
+  }
+  .rec-title {
+    font-family: var(--serif); font-weight: 600;
+    font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--gold); margin: 0 0 6px;
+  }
+  .rec-body {
+    font-family: var(--display); font-style: italic; font-weight: 400;
+    font-size: 22px; line-height: 1.4; color: var(--cream);
+    max-width: 820px;
+  }
+  .rec-body b { color: var(--gold-bright); font-weight: 500; }
+
+  footer {
+    text-align: center;
+    font-family: var(--display); font-style: italic;
+    color: var(--cream-soft); font-size: 14px;
+    padding: 24px 0 0;
+  }
+
+  .composer {
+    margin-top: 24px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px 12px 22px;
+    background: var(--canvas-0);
+    border: 1px solid rgba(212,165,116,0.14);
+    border-radius: 999px;
+  }
+  .composer-input {
+    flex: 1; font-family: var(--serif); font-size: 17px;
+    color: rgba(245,234,227,0.45);
+  }
+  .composer-mic {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #2c1a28, #100810 80%);
+    border: 1px solid rgba(212,165,116,0.42);
+    display: grid; place-items: center;
+    color: var(--gold);
+  }
+</style>
+</head>
+<body>
+<main class="stage">
+
+  <header class="header">
+    <div class="wordmark">Layla</div>
+    <div class="crumb">design study · <b>chart bubble</b> · v1</div>
+  </header>
+
+  <section class="compare">
+
+    <!-- ─────── DIRECTION A: TYPOGRAPHIC ─────── -->
+    <div>
+      <div class="col-head">
+        <div class="col-tag">Direction A</div>
+        <div class="col-title">Refined typographic · manuscript page</div>
+        <p class="col-blurb">
+          Pure typography. The chart unfolds like a page from an
+          antiquarian almanac — tier labels in tracked gold caps,
+          hairline rules, planet names whispered as italicized
+          subtitles, signs and houses given the typographic weight
+          they deserve. No graphics — the typography <em>is</em>
+          the ornament.
+        </p>
+      </div>
+
+      <div class="phone">
+        <div class="status"><span>21:44</span><span>62%</span></div>
+        <div class="botname">Layla</div>
+
+        <div class="botbubble">
+          <span class="botdot"></span>
+          <div class="botcontent">
+
+            <p class="lead">
+              <b>Barak</b> — here's your map. <em>The architecture of you, in nine voices.</em>
+            </p>
+
+            <!-- Luminaries -->
+            <div class="tier">
+              <div class="tier-head">
+                <span class="label">Luminaries</span>
+                <span class="ornament">✦</span>
+                <span class="line"></span>
+              </div>
+              <div class="row">
+                <span class="glyph">☉</span>
+                <span class="sign"><b>Scorpio</b> <span class="planet-name">Sun</span></span>
+                <span class="house"><b>5</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">☾</span>
+                <span class="sign"><b>Gemini</b> <span class="planet-name">Moon</span></span>
+                <span class="house"><b>12</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">↑</span>
+                <span class="sign"><b>Scorpio</b> <span class="planet-name">Rising</span></span>
+                <span class="house"><b>1</b><sup>st</sup> house</span>
+              </div>
+            </div>
+
+            <!-- Personal -->
+            <div class="tier">
+              <div class="tier-head">
+                <span class="label">Personal</span>
+                <span class="ornament">✦</span>
+                <span class="line"></span>
+              </div>
+              <div class="row">
+                <span class="glyph">☿</span>
+                <span class="sign"><b>Sagittarius</b> <span class="planet-name">Mercury</span></span>
+                <span class="house"><b>6</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">♀</span>
+                <span class="sign"><b>Scorpio</b> <span class="planet-name">Venus</span></span>
+                <span class="house"><b>5</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">♂</span>
+                <span class="sign"><b>Sagittarius</b> <span class="planet-name">Mars</span></span>
+                <span class="house"><b>6</b><sup>th</sup> house</span>
+              </div>
+            </div>
+
+            <!-- Social -->
+            <div class="tier">
+              <div class="tier-head">
+                <span class="label">Social</span>
+                <span class="ornament">✦</span>
+                <span class="line"></span>
+              </div>
+              <div class="row">
+                <span class="glyph">♃</span>
+                <span class="sign"><b>Leo</b> <span class="planet-name">Jupiter</span></span>
+                <span class="house"><b>3</b><sup>rd</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">♄</span>
+                <span class="sign"><b>Virgo</b> <span class="planet-name">Saturn</span></span>
+                <span class="house"><b>4</b><sup>th</sup> house</span>
+              </div>
+            </div>
+
+            <!-- Outer -->
+            <div class="tier">
+              <div class="tier-head">
+                <span class="label">Outer</span>
+                <span class="ornament">✦</span>
+                <span class="line"></span>
+              </div>
+              <div class="row">
+                <span class="glyph">♅</span>
+                <span class="sign"><b>Scorpio</b> <span class="planet-name">Uranus</span></span>
+                <span class="house"><b>5</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">♆</span>
+                <span class="sign"><b>Sagittarius</b> <span class="planet-name">Neptune</span></span>
+                <span class="house"><b>6</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">♇</span>
+                <span class="sign"><b>Libra</b> <span class="planet-name">Pluto</span></span>
+                <span class="house"><b>4</b><sup>th</sup> house</span>
+              </div>
+            </div>
+
+            <!-- Points -->
+            <div class="tier">
+              <div class="tier-head">
+                <span class="label">Points</span>
+                <span class="ornament">✦</span>
+                <span class="line"></span>
+              </div>
+              <div class="row">
+                <span class="glyph">⚷</span>
+                <span class="sign"><b>Taurus</b> <span class="planet-name">Chiron</span></span>
+                <span class="house"><b>11</b><sup>th</sup> house</span>
+              </div>
+            </div>
+
+            <div class="flourish">
+              <span class="line"></span>
+              <span class="dot"></span>
+              <span class="line"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="composer-input">Tell Layla…</div>
+          <div class="composer-mic">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <rect x="9" y="3" width="6" height="11" rx="3"/>
+              <path d="M5 11a7 7 0 0 0 14 0"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h3>What's doing the work</h3>
+        <ul>
+          <li><b>Tier headers</b> in tracked gold caps with a hairline fade — gives the page its almanac rhythm. Five tiers: Luminaries · Personal · Social · Outer · Points.</li>
+          <li><b>Three-column row</b>: glyph (fixed 24pt column) · sign+planet (sign in Fraunces italic gold, planet name whispered in serif italic cream-soft) · house (tracked caps with a gold ordinal).</li>
+          <li><b>Ship path</b>: brain emits richer markdown from <code>_chart_ready_headline()</code> — tier dividers + per-line house data. <b>Zero new event types needed.</b> The existing Bubble.tsx markdown renderer handles it via custom heading + bullet styles.</li>
+          <li><b>Reading order</b> stays top-to-bottom — luminaries first, what most users came for.</li>
+        </ul>
+      </div>
+    </div>
+
+
+    <!-- ─────── DIRECTION B: WHEEL + TYPOGRAPHIC ─────── -->
+    <div>
+      <div class="col-head">
+        <div class="col-tag">Direction B</div>
+        <div class="col-title">Wheel medallion · then the manuscript</div>
+        <p class="col-blurb">
+          A small natal-wheel medallion crowns the bubble — 12 house
+          spokes, planets placed in their houses, gold-on-near-black.
+          Below: the same typographic page. The wheel gives the bubble
+          a visual centerpiece — the first thing the eye lands on —
+          before the typography fills in the meaning.
+        </p>
+      </div>
+
+      <div class="phone">
+        <div class="status"><span>21:44</span><span>62%</span></div>
+        <div class="botname">Layla</div>
+
+        <div class="botbubble">
+          <span class="botdot"></span>
+          <div class="botcontent">
+
+            <p class="lead">
+              <b>Barak</b> — here's your map.
+            </p>
+
+            <!-- ───── Chart wheel medallion ───── -->
+            <div class="wheel-wrap">
+              <div class="wheel">
+                <svg viewBox="0 0 300 300">
+                  <defs>
+                    <radialGradient id="wheelBg" cx="50%" cy="50%" r="55%">
+                      <stop offset="0%" stop-color="#1f1424" />
+                      <stop offset="70%" stop-color="#150c19" />
+                      <stop offset="100%" stop-color="#0c0610" />
+                    </radialGradient>
+                    <linearGradient id="rimGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#ead08e" stop-opacity="0.8"/>
+                      <stop offset="50%" stop-color="#D4A574" stop-opacity="0.5"/>
+                      <stop offset="100%" stop-color="#5C4338" stop-opacity="0.4"/>
+                    </linearGradient>
+                  </defs>
+
+                  <!-- Background medallion -->
+                  <circle cx="150" cy="150" r="140" fill="url(#wheelBg)" stroke="url(#rimGlow)" stroke-width="1.2"/>
+                  <!-- Inner gold hairline -->
+                  <circle cx="150" cy="150" r="118" fill="none" stroke="rgba(212,165,116,0.30)" stroke-width="0.6"/>
+                  <!-- Inner mauve circle -->
+                  <circle cx="150" cy="150" r="50" fill="none" stroke="rgba(212,165,116,0.20)" stroke-width="0.6"/>
+
+                  <!-- ─── 12 house spokes ─── -->
+                  <!--
+                    House 1 cusp is the Ascendant — by convention, drawn pointing left (9 o'clock).
+                    Houses go counter-clockwise from there: 1, 2, 3, … 12.
+                    Each spoke is 30° apart.
+                    Spoke angles (mathematical, 0° = east/3 o'clock, counter-clockwise = positive):
+                      house 1 cusp = 180° (left)
+                      house 2 cusp = 210°
+                      …
+                      house 12 cusp = 150°
+                  -->
+                  <g stroke="rgba(212,165,116,0.22)" stroke-width="0.6">
+                    <line x1="10" y1="150" x2="290" y2="150"/>             <!-- horizontal Asc–Desc axis -->
+                    <line x1="150" y1="10" x2="150" y2="290"/>             <!-- vertical MC–IC axis -->
+                    <!-- intermediate spokes at 30° steps -->
+                    <line x1="80.4" y1="29.6" x2="219.6" y2="270.4"/>
+                    <line x1="29.6" y1="80.4" x2="270.4" y2="219.6"/>
+                    <line x1="29.6" y1="219.6" x2="270.4" y2="80.4"/>
+                    <line x1="80.4" y1="270.4" x2="219.6" y2="29.6"/>
+                  </g>
+
+                  <!-- ─── House numbers in tracked gold caps near the rim ─── -->
+                  <!-- house 1 sits to the left below Asc, house 2 below that, etc. -->
+                  <g font-family="Cormorant Garamond, serif" font-size="9.5" fill="#9C7A57" letter-spacing="1" text-anchor="middle">
+                    <text x="32"  y="180">1</text>
+                    <text x="55"  y="240">2</text>
+                    <text x="110" y="280">3</text>
+                    <text x="170" y="282">4</text>
+                    <text x="232" y="265">5</text>
+                    <text x="278" y="225">6</text>
+                    <text x="278" y="155">7</text>
+                    <text x="265" y="100">8</text>
+                    <text x="225" y="55">9</text>
+                    <text x="170" y="34">10</text>
+                    <text x="115" y="36">11</text>
+                    <text x="55"  y="78">12</text>
+                  </g>
+
+                  <!-- ─── 12 zodiac glyphs around the outer ring (very small) ─── -->
+                  <g font-family="Cormorant Garamond, serif" font-size="11" fill="#D4A574" text-anchor="middle">
+                    <!-- positioned at radius ~133, angle = house * 30° + 15° offset (mid-house) -->
+                    <text x="22"  y="158" >♏</text>  <!-- Scorpio at Asc area, rotates by birth -->
+                    <text x="44"  y="218" >♐</text>
+                    <text x="98"  y="266" >♑</text>
+                    <text x="170" y="271" >♒</text>
+                    <text x="232" y="252" >♓</text>
+                    <text x="270" y="206" >♈</text>
+                    <text x="282" y="158" >♉</text>
+                    <text x="265" y="100" >♊</text>
+                    <text x="224" y="58"  >♋</text>
+                    <text x="170" y="40"  >♌</text>
+                    <text x="120" y="48"  >♍</text>
+                    <text x="68"  y="80"  >♎</text>
+                  </g>
+
+                  <!-- ─── Planet placements (positioned mid-house) ─── -->
+                  <!-- Each is at radius ~85 from center, angle = the planet's house mid-angle.
+                       For Barak's sample chart:
+                         Sun ♏ 5th → mid of 5th house spoke (between 4 and 5)
+                         Moon ☾ 12th → mid of 12th
+                         Mercury ☿ 6th, Venus ♀ 5th, Mars ♂ 6th
+                         Jupiter ♃ 3rd, Saturn ♄ 4th
+                         Uranus ♅ 5th, Neptune ♆ 6th, Pluto ♇ 4th
+                         Chiron ⚷ 11th
+                  -->
+                  <g font-family="Cormorant Garamond, serif" font-size="15" fill="#ead08e" text-anchor="middle" font-weight="600">
+                    <!-- 1st house: Asc marker -->
+                    <text x="62"  y="190" >↑</text>
+                    <!-- 3rd house: Jupiter -->
+                    <text x="120" y="232" >♃</text>
+                    <!-- 4th house: Saturn, Pluto -->
+                    <text x="160" y="240" >♄</text>
+                    <text x="180" y="232" >♇</text>
+                    <!-- 5th house: Sun, Venus, Uranus -->
+                    <text x="216" y="220" >☉</text>
+                    <text x="230" y="200" >♀</text>
+                    <text x="238" y="180" >♅</text>
+                    <!-- 6th house: Mercury, Mars, Neptune -->
+                    <text x="240" y="158" >☿</text>
+                    <text x="238" y="138" >♂</text>
+                    <text x="230" y="118" >♆</text>
+                    <!-- 11th house: Chiron -->
+                    <text x="100" y="78"  >⚷</text>
+                    <!-- 12th house: Moon -->
+                    <text x="60"  y="118" >☾</text>
+                  </g>
+
+                  <!-- Center ornament: small rosette -->
+                  <g transform="translate(150 150)">
+                    <circle r="3.2" fill="#D4A574"/>
+                    <circle r="6" fill="none" stroke="rgba(212,165,116,0.30)" stroke-width="0.6"/>
+                  </g>
+
+                  <!-- Asc / MC labels (compass cues) -->
+                  <g font-family="Cormorant Garamond, serif" font-size="8" fill="#9C7A57" letter-spacing="2" font-weight="600">
+                    <text x="6"  y="146" text-anchor="start">ASC</text>
+                    <text x="294" y="146" text-anchor="end">DSC</text>
+                    <text x="150" y="9"   text-anchor="middle">MC</text>
+                    <text x="150" y="298" text-anchor="middle">IC</text>
+                  </g>
+                </svg>
+              </div>
+            </div>
+
+            <!-- Same typographic listing as A, abbreviated for space -->
+            <div class="tier">
+              <div class="tier-head">
+                <span class="label">Luminaries</span>
+                <span class="ornament">✦</span>
+                <span class="line"></span>
+              </div>
+              <div class="row">
+                <span class="glyph">☉</span>
+                <span class="sign"><b>Scorpio</b> <span class="planet-name">Sun</span></span>
+                <span class="house"><b>5</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">☾</span>
+                <span class="sign"><b>Gemini</b> <span class="planet-name">Moon</span></span>
+                <span class="house"><b>12</b><sup>th</sup> house</span>
+              </div>
+              <div class="row">
+                <span class="glyph">↑</span>
+                <span class="sign"><b>Scorpio</b> <span class="planet-name">Rising</span></span>
+                <span class="house"><b>1</b><sup>st</sup> house</span>
+              </div>
+            </div>
+
+            <div class="tier">
+              <div class="tier-head">
+                <span class="label">Personal · Social · Outer · Points</span>
+                <span class="ornament">✦</span>
+                <span class="line"></span>
+              </div>
+              <div class="row">
+                <span class="glyph" style="opacity:0.4">…</span>
+                <span class="sign" style="color:var(--cream-soft); font-style:italic; font-size:14px;">eight more placements below, same row pattern</span>
+                <span class="house" style="opacity:0.5;">↓</span>
+              </div>
+            </div>
+
+            <div class="flourish">
+              <span class="line"></span>
+              <span class="dot"></span>
+              <span class="line"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="composer-input">Tell Layla…</div>
+          <div class="composer-mic">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <rect x="9" y="3" width="6" height="11" rx="3"/>
+              <path d="M5 11a7 7 0 0 0 14 0"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h3>What's doing the work</h3>
+        <ul>
+          <li><b>The wheel</b> — 268pt SVG medallion. 12 house spokes + Asc/Desc/MC/IC compass labels + zodiac glyphs around the rim + planet glyphs placed at their house mid-angles. Center rosette holds the eye.</li>
+          <li><b>Asc on the left</b> (astrology convention — 9 o'clock). Houses count counter-clockwise from there. The user's actual Ascendant rotates the zodiac ring; sample shows Scorpio rising.</li>
+          <li><b>Below the wheel</b>: same typographic page as Direction A (abbreviated here for layout). The wheel is a visual anchor; the list is the legible truth.</li>
+          <li><b>Ship path</b>: brain emits a new <code>chart_wheel</code> event (or piggybacks on <code>media</code>) with the planet/sign/house data; iOS draws the wheel SVG with <code>react-native-svg</code>. Brain also emits the markdown typography. ~1 new component (<code>ChartWheel.tsx</code>) + a few lines in <code>_chart_ready_headline()</code>.</li>
+          <li><b>Tradeoff</b>: more code (~150 lines) and the wheel adds visual weight that competes with Layla's voice. But the moment of the chart arriving is THE moment of the app — a centerpiece earns its keep here.</li>
+        </ul>
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ─────── Recommendation ─────── -->
+  <section class="rec">
+    <p class="rec-title">recommendation</p>
+    <p class="rec-body">
+      Ship <b>Direction A first</b>. Zero new event types, zero new components — just richer markdown from <code style="font-family: ui-monospace; font-size:0.7em; background:rgba(0,0,0,0.35); padding:1px 6px; border-radius:3px; color:var(--gold-bright)">_chart_ready_headline()</code>. The typographic page already feels like a gift unfolded; the wheel is the next move once Direction A lands and you want to crown it.
+    </p>
+  </section>
+
+  <footer>Layla · chart bubble · refined typographic + wheel</footer>
+</main>
+</body>
+</html>

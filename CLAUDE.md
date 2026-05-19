@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `context.md` — long-form, frequently-updated handoff for the current state of the system across **both** repos. Anything in this CLAUDE.md that disagrees with `context.md` is stale; trust `context.md` and update CLAUDE.md.
 - `spec.md` — active product spec (the Laila chat-first Map + Moment + Orbit redesign). Source of truth for product behavior and copy. Core value: *"we add value to the user."*
+- `UI_UX_GUIDE.md` — typography + color + motion + accessibility rules. Read before sizing chip labels, picking a font for a new surface, or styling markdown in `Bubble.tsx`. Distinguishes **UI controls** (Inter/system, 14-15px base, 12px floor) from **brand voice** (serif — Cochin/Fraunces).
 
 ## Two-repo system
 
@@ -109,13 +110,15 @@ If the MCP isn't restarted yet, `scripts/monitor.py` is the same capability via 
 ### MCP — XcodeBuildMCP (iOS simulator)
 Drives the iOS Simulator end-to-end: build/run, boot, tap, type, swipe, screenshot, runtime log capture, and (the magic) `describe_ui` — a structured accessibility tree of the iOS app with element text + coords. This is what lets a fresh agent verify chat behavior in the native simulator without you tapping.
 
-Already registered in `~/.claude.json` for this project:
+Already registered in `~/.claude.json` for this project, with the `ui-automation` workflow group enabled (default registration enables only `simulator`, which is missing `tap`/`type`/`swipe`/`key_sequence`):
 ```bash
-claude mcp add XcodeBuildMCP -- npx -y xcodebuildmcp@latest mcp
+claude mcp add XcodeBuildMCP \
+  -e XCODEBUILDMCP_ENABLED_WORKFLOWS=simulator,ui-automation \
+  -- npx -y xcodebuildmcp@latest mcp
 # verify:
 claude mcp list   # XcodeBuildMCP should show ✓ Connected
 ```
-After registering you must restart the Claude Code session for the new tools to surface in the deferred-tool set.
+After registering you must restart the Claude Code session for the new tools to surface in the deferred-tool set. Other workflow groups exist (`debugging`, `xcode-ide`) — add them to the env-var list if needed.
 
 Driving pattern for chat verification:
 1. `simulator-management:boot` an iPhone 16 Plus (the canonical sim for Layla).

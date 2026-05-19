@@ -855,13 +855,19 @@ const markdownStyles = {
     letterSpacing: 0.5,
   },
   heading3: {
+    // Used as a "section label" — appears on the chart-sigil bubble's
+    // tier headers (Luminaries / Personal / Social / Outer / Points)
+    // and occasionally on chat replies. Tracked-caps gold treatment
+    // gives the manuscript-page feel the brand calls for. Smaller than
+    // h1/h2 because it's a label, not a title.
     color: theme.accent,
-    fontSize: 17,
-    lineHeight: 24,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: "600" as const,
-    marginTop: 4,
-    marginBottom: 8,
-    letterSpacing: 0.25,
+    marginTop: 14,
+    marginBottom: 6,
+    letterSpacing: 2,
+    textTransform: "uppercase" as const,
   },
   heading4: {
     color: theme.accent,
