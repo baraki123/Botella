@@ -59,8 +59,14 @@ export interface PeopleScreenProps {
   /** Host-provided deep-link helper. When invoked with a text string,
    * the host (App.tsx) switches to the chat route AND queues that text
    * to be sent to the WS once chat is mounted. Used by the floating +
-   * button and the "Talk to Layla about X" affordance. */
-  onSendToChat?: (text: string) => void;
+   * button and the "Talk to Layla about X" affordance.
+   *
+   * Optional second arg `focusPersonId` — when set, the queued WS
+   * frame also carries `callback_data: "__focus_person:<id>"` so the
+   * brain pins THAT person as the chat's focus for the resulting
+   * reply (the "Talk to Layla about Maya" path). Plain + button
+   * doesn't pass it. */
+  onSendToChat?: (text: string, focusPersonId?: string) => void;
 }
 
 export function PeopleScreen({ jwt, onClose, onSendToChat }: PeopleScreenProps) {
@@ -125,7 +131,12 @@ export function PeopleScreen({ jwt, onClose, onSendToChat }: PeopleScreenProps) 
         Alert.alert("Chat", `Go back to chat and ask about ${person.name}.`);
         return;
       }
-      onSendToChat(`I want to talk about ${person.name}.`);
+      // Pass `person.id` so the queued WS frame carries
+      // `callback_data: "__focus_person:<id>"`. The brain pins this
+      // person as the focus for the resulting reply — Layla cites
+      // their actual placements + synastry, not a generic orbit
+      // summary.
+      onSendToChat(`I want to talk about ${person.name}.`, person.id);
     },
     [onSendToChat],
   );

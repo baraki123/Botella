@@ -22,6 +22,11 @@ export default function App() {
   // (then calls onPendingConsumed to clear). Plain prop drilling beats
   // pulling in a state lib for one signal.
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
+  // Companion focus-id slot. When People→"Talk about Maya" enters chat,
+  // we send `callback_data: "__focus_person:<id>"` on the queued WS
+  // frame so the brain's free_chat pins Maya as the turn's focus.
+  // Cleared together with the message via onPendingConsumed.
+  const [pendingFocusPersonId, setPendingFocusPersonId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,7 +81,11 @@ export default function App() {
           onOpenSettings={() => setRoute("settings")}
           onOpenPeople={() => setRoute("people")}
           pendingMessage={pendingChatMessage}
-          onPendingConsumed={() => setPendingChatMessage(null)}
+          pendingFocusPersonId={pendingFocusPersonId}
+          onPendingConsumed={() => {
+            setPendingChatMessage(null);
+            setPendingFocusPersonId(null);
+          }}
         />
         {route === "settings" ? (
           <View style={StyleSheet.absoluteFillObject}>
@@ -91,8 +100,9 @@ export default function App() {
             <PeopleScreen
               jwt={session.jwt}
               onClose={() => setRoute("chat")}
-              onSendToChat={(text) => {
+              onSendToChat={(text, focusPersonId) => {
                 setPendingChatMessage(text);
+                setPendingFocusPersonId(focusPersonId ?? null);
                 setRoute("chat");
               }}
             />

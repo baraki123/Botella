@@ -69,6 +69,11 @@ export interface ChatScreenProps {
    * Used by the People tab's "+" button and "Talk to Layla about X"
    * deep-links. */
   pendingMessage?: string | null;
+  /** Optional focus-person id. When set alongside pendingMessage, the
+   * WS frame includes `callback_data: "__focus_person:<id>"` so the
+   * brain pins that person as the chat's focus for that one turn.
+   * Used by "Talk to Layla about Maya" from the Orbit detail view. */
+  pendingFocusPersonId?: string | null;
   onPendingConsumed?: () => void;
 }
 
@@ -76,6 +81,7 @@ export function ChatScreen({
   onOpenSettings,
   onOpenPeople,
   pendingMessage,
+  pendingFocusPersonId,
   onPendingConsumed,
 }: ChatScreenProps = {}) {
   const [session, setSession] = useState<Session | null>(null);
@@ -265,13 +271,19 @@ export function ChatScreen({
   // via `onPendingConsumed` so the same message can't fire twice.
   // We send via the normal `send()` so the message renders in the
   // composer-echo position and smart-snap fires identically.
+  // If `pendingFocusPersonId` is set, the WS frame also carries
+  // `callback_data: "__focus_person:<id>"` so the brain pins THAT
+  // person as the focus for the one reply.
   useEffect(() => {
     if (!pendingMessage) return;
     if (status !== "open") return;
-    send(pendingMessage);
+    const cb = pendingFocusPersonId
+      ? `__focus_person:${pendingFocusPersonId}`
+      : undefined;
+    send(pendingMessage, cb ? { callback_data: cb } : undefined);
     onPendingConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingMessage, status]);
+  }, [pendingMessage, pendingFocusPersonId, status]);
 
   // When a long bot bubble lands (first-map section, deep chat reply,
   // etc.) the user needs the full screen to read. If the keyboard is
@@ -485,7 +497,10 @@ export function ChatScreen({
     }
   }
 
-  function send(text: string, opts?: { voice?: boolean }) {
+  function send(
+    text: string,
+    opts?: { voice?: boolean; callback_data?: string },
+  ) {
     // Always render the user's message immediately. The StreamClient queues
     // the wire-send if the WS isn't open and flushes on reconnect, so the
     // user never has to wonder whether their message went through.
@@ -494,7 +509,11 @@ export function ChatScreen({
     // sticky-bottom-following.
     jumpToLatest();
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
-    streamRef.current?.send({ text, voice_origin: opts?.voice });
+    streamRef.current?.send({
+      text,
+      voice_origin: opts?.voice,
+      ...(opts?.callback_data ? { callback_data: opts.callback_data } : {}),
+    });
   }
 
   async function toggleRecord() {
