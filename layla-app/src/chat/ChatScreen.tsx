@@ -61,6 +61,34 @@ export const CHAT_KEY_FOR = (userId: string) => `${CHAT_KEY_PREFIX}${userId}`;
 const CHAT_HISTORY_CAP = 60;
 const CHAT_PERSIST_DEBOUNCE_MS = 500;
 
+// Paginated-read buffer key. The brain ships all 9 sections + chip
+// labels + post-pivot text + doorway chips in one paginated_read event;
+// the iOS client renders one section per Continue tap from a RAM ref.
+// Persisting that buffer to AsyncStorage means a WS drop mid-read
+// (or backgrounding the app) no longer loses sections 4-9. Tied to
+// user_id so account switches don't carry stale buffers.
+const PAGINATED_KEY_PREFIX = "layla:paginated_read:";
+const PAGINATED_KEY_FOR = (userId: string) =>
+  `${PAGINATED_KEY_PREFIX}${userId}`;
+
+// Fire-and-forget save / clear of the paginated buffer. `null` clears.
+// userId is optional so callers don't have to gate every call — the
+// helper no-ops when there's no session.
+function persistPaginatedBuffer(
+  userId: string | undefined,
+  buffer:
+    | { sections: string[]; chipLabels: string[]; postText: string; doorways: QuickReplyOption[] }
+    | null,
+) {
+  if (!userId) return;
+  const key = PAGINATED_KEY_FOR(userId);
+  if (buffer == null) {
+    AsyncStorage.removeItem(key).catch(() => {});
+  } else {
+    AsyncStorage.setItem(key, JSON.stringify(buffer)).catch(() => {});
+  }
+}
+
 export interface ChatScreenProps {
   onOpenSettings?: () => void;
   onOpenPeople?: () => void;
@@ -217,6 +245,38 @@ export function ChatScreen({
         hydratedRef.current = true;
       });
   }, [session]);
+
+  // 1b'. Hydrate the paginated-read buffer (sections 4-9 etc) from
+  // AsyncStorage. Without this, a WS drop OR a fresh app launch mid-
+  // read loses the buffered sections — paginatedReadRef is RAM-only.
+  // We hydrate alongside chat history so the user can tap Continue on
+  // the most recent section bubble (restored above) and advance into
+  // the next stored section locally, no round-trip.
+  useEffect(() => {
+    if (!session) return;
+    AsyncStorage.getItem(PAGINATED_KEY_FOR(session.userId))
+      .then((raw) => {
+        if (!raw) return;
+        try {
+          const saved = JSON.parse(raw);
+          if (
+            saved
+            && Array.isArray(saved.sections)
+            && Array.isArray(saved.chipLabels)
+            && typeof saved.postText === "string"
+            && Array.isArray(saved.doorways)
+          ) {
+            paginatedReadRef.current = saved;
+          }
+        } catch {
+          // Corrupt buffer — ignore; user can /newchart to recover.
+        }
+      })
+      .catch(() => {});
+    // Hydration runs once per session. paginatedReadRef has no setState
+    // so a dep on session.userId is enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.userId]);
 
   // 1c. Debounced persistence: save the tail of `messages` to AsyncStorage
   // so a full reload can restore the conversation. We skip mid-stream
@@ -461,6 +521,7 @@ export function ChatScreen({
           postText,
           doorways,
         };
+        persistPaginatedBuffer(session?.userId, paginatedReadRef.current);
         return;
       }
 
@@ -629,6 +690,7 @@ export function ChatScreen({
         },
       ]);
       paginatedReadRef.current = null;
+      persistPaginatedBuffer(session?.userId, null);
       return;
     }
     const nextText = state.sections[0];
@@ -648,6 +710,7 @@ export function ChatScreen({
       postText: state.postText,
       doorways: state.doorways,
     };
+    persistPaginatedBuffer(session?.userId, paginatedReadRef.current);
   }
 
   if (authError) {
