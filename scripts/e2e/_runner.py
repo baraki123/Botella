@@ -151,6 +151,111 @@ def wait_for_bubble_text(page, substring: str, timeout_ms: int = 10000) -> bool:
 # ─── Direct DB seeding for tests that bypass onboarding ───────────────────
 
 
+def seed_user_record(user_id: str, patch: dict) -> None:
+    """Merge `patch` into the user's record JSONB via GombiStar's
+    PostgresStorage (different venv). Same env-loading dance as
+    seed_orbit so DATABASE_URL is in scope when the subprocess spawns.
+
+    Use cases: seed pending_noticing, lang, chart_data, current_moment,
+    chat_history — anything the noticing / get_to_know / focus-person
+    tests need to drive a deterministic UI path without burning LLM."""
+    import os
+    import subprocess
+
+    env = os.environ.copy()
+    if "DATABASE_URL" not in env:
+        gs_env = Path("/Users/barakben-ezer/Desktop/Coding/GombiStar/.env")
+        if gs_env.exists():
+            for line in gs_env.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                v = v.strip().strip("'\"")
+                env.setdefault(k.strip(), v)
+
+    py = "/Users/barakben-ezer/Desktop/Coding/GombiStar/venv/bin/python"
+    script = (
+        "import asyncio, json, sys\n"
+        'sys.path.insert(0, "/Users/barakben-ezer/Desktop/Coding/GombiStar")\n'
+        "from database.storage import PostgresStorage\n"
+        "payload = json.load(sys.stdin)\n"
+        "async def go():\n"
+        "    s = PostgresStorage()\n"
+        '    await s.update_user(payload["user_id"], payload["patch"])\n'
+        "asyncio.run(go())\n"
+    )
+    stdin_payload = json.dumps({"user_id": user_id, "patch": patch})
+    proc = subprocess.run(
+        [py, "-c", script],
+        input=stdin_payload,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"seed_user_record failed (exit {proc.returncode}):\n"
+            f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
+        )
+
+
+def get_user_record(user_id: str) -> dict:
+    """Read the user's record via the same PostgresStorage path used by
+    seed_user_record. Returns the merged dict — useful for asserting
+    that a flow wrote the expected fields back."""
+    import os
+    import subprocess
+
+    env = os.environ.copy()
+    if "DATABASE_URL" not in env:
+        gs_env = Path("/Users/barakben-ezer/Desktop/Coding/GombiStar/.env")
+        if gs_env.exists():
+            for line in gs_env.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                v = v.strip().strip("'\"")
+                env.setdefault(k.strip(), v)
+
+    py = "/Users/barakben-ezer/Desktop/Coding/GombiStar/venv/bin/python"
+    script = (
+        "import asyncio, json, sys\n"
+        'sys.path.insert(0, "/Users/barakben-ezer/Desktop/Coding/GombiStar")\n'
+        "from database.storage import PostgresStorage\n"
+        "uid = sys.stdin.read().strip()\n"
+        "async def go():\n"
+        "    s = PostgresStorage()\n"
+        "    rec = await s.get_user(uid) or {}\n"
+        "    print(json.dumps(rec, default=str))\n"
+        "asyncio.run(go())\n"
+    )
+    proc = subprocess.run(
+        [py, "-c", script],
+        input=user_id,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"get_user_record failed (exit {proc.returncode}):\n"
+            f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
+        )
+    return json.loads(proc.stdout)
+
+
+def send_text(page, text: str) -> None:
+    """Type into the composer + press the send button. Mirrors a real
+    user tap; the composer's onSubmit handler renders the user bubble
+    and pushes the message to the WS."""
+    composer = page.locator('[data-testid="composer-input"]')
+    composer.click()
+    composer.fill(text)
+    page.locator('[data-testid="send-button"]').click()
+
+
 def seed_orbit(user_id: str, people: list[dict]) -> None:
     """Write a list of OrbitPerson dicts to the user's user_record.orbit
     via GombiStar's PostgresStorage (different venv). We pass the

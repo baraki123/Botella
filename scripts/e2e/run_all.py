@@ -21,6 +21,8 @@ from playwright.sync_api import sync_playwright
 
 from scripts.e2e import (
     e2e_chat_persistence,
+    e2e_get_to_know,
+    e2e_noticing,
     e2e_onboarding_early,
     e2e_people_tab,
     e2e_share_card,
@@ -36,6 +38,8 @@ TESTS = [
     ("chat-persistence", e2e_chat_persistence.run),
     ("share-card", e2e_share_card.run),
     ("people-tab", e2e_people_tab.run),
+    ("get-to-know", e2e_get_to_know.run),
+    ("noticing-surface", e2e_noticing.run),
 ]
 
 
