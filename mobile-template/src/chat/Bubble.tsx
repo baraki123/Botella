@@ -1,7 +1,9 @@
+import * as Clipboard from "expo-clipboard";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Image, Platform, Pressable, Share, StyleSheet, Text, View } from "react-native";
 // @ts-ignore — no shipped types
 import Markdown from "react-native-markdown-display";
+import Svg, { Path } from "react-native-svg";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
@@ -16,18 +18,40 @@ import type { Message } from "./types";
 
 // Long-form bot bubbles get a ▶ Listen affordance. Short replies don't —
 // the play button on a one-line "I'm with you" would be visual noise.
-// Exported so a fork's ChatScreen can use the same threshold to decide
-// which new bubbles to prefetch TTS audio for.
+// Exported so ChatScreen can use the same threshold when deciding which
+// new bubbles to prefetch TTS audio for.
 export const PLAY_BUTTON_MIN_CHARS = 220;
 
-// Suppress Listen on chart-sigil header bubbles (the "your chart's
-// ready" + planet/sign list emitted right after onboarding). They
-// cross 220 chars from sign names alone, but TTS reads the Unicode
-// glyphs awkwardly ("sun symbol moon symbol…"). Detect by either the
-// literal phrase or 2+ astrology symbols in the text.
+// Typewriter reveal kicks in on long completed bot bubbles. Tuned so a
+// typical section (~800 chars) reveals in ~3 seconds — fast enough to
+// not feel laborious, slow enough to read "Layla is writing." Tap the
+// bubble to skip to the full text instantly.
+const TYPEWRITER_MIN_CHARS = 240;
+const TYPEWRITER_TARGET_DURATION_MS = 3000;
+const TYPEWRITER_MIN_DURATION_MS = 900;
+const TYPEWRITER_MAX_DURATION_MS = 4500;
+
+// Module-scope ID sets so component re-mounts (list virtualization, key
+// reuse) don't replay the typewriter. Once a message has been streamed
+// OR fully revealed once, it stays settled forever.
+const STREAMED_BUBBLE_IDS = new Set<string>();
+const REVEALED_BUBBLE_IDS = new Set<string>();
+
+// The chart-sigil bubble emitted right after onboarding ("Avi — your
+// chart's ready. ☀ Aries Sun · ☾ Leo Moon · …") crosses the 220-char
+// threshold from sign names alone, so the Listen pill rendered on it.
+// But a planet/sign list is not something you want spoken aloud — TTS
+// reads "sun symbol" / "moon symbol" / one Unicode glyph at a time.
+// Detect: contains "your chart's ready" OR 2+ astrology sigils, and
+// suppress the pill.
 const ASTRO_SIGILS = /[☀☾↑☿♀♂♃♄♅♆♇⚷]/g;
 function isChartSigilBubble(text: string): boolean {
-  if (/your chart['']?s ready|המפה שלך מוכנה/i.test(text)) return true;
+  // Lead-in phrases the brain emits with the sigil block. New format
+  // ("here's your map") replaced the old ("your chart's ready"); we
+  // match both so older sessions still suppress the Listen pill. As a
+  // safety net we also count astrology sigils — two or more = sigil
+  // block even when the lead-in copy drifts again.
+  if (/here['']?s your map|your chart['']?s ready|הנה המפה שלך|המפה שלך מוכנה/i.test(text)) return true;
   const sigilCount = (text.match(ASTRO_SIGILS) || []).length;
   return sigilCount >= 2;
 }
@@ -37,9 +61,15 @@ interface Props {
   /** Called when the user taps an inline image. Caller opens the
    * full-screen lightbox. */
   onImagePress?: (uri: string) => void;
-  /** Active language. In Hebrew, flip the bot row so the gold dot leads
-   * at the right edge. Defaults to "en". */
+  /** Active language. In Hebrew, flip the bot row's flex direction so the
+   * gold dot leads at the right edge (where the reading eye starts in
+   * RTL), and right-align text content. Defaults to "en". */
   lang?: "en" | "he";
+  /** Long-press on a completed, substantial bot bubble (≥220 chars,
+   * not a chart-sigil header) fires this with the stripped text. The
+   * host (ChatScreen) opens the share-as-card preview. Streaming
+   * bubbles never call this — the text is still growing. */
+  onLongPressShare?: (text: string) => void;
 }
 
 /**
@@ -54,12 +84,21 @@ interface Props {
  * gold dot blooms in slightly after Layla's text starts settling — small
  * timing detail that makes her presence feel composed rather than abrupt.
  */
-export function Bubble({ message, onImagePress, lang = "en" }: Props) {
+export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }: Props) {
   const isUser = message.role === "user";
-  const isRTL = lang === "he";
   // Memoize per-bubble so streaming-token re-renders + chat-state
   // updates don't re-walk the regex chain on every paint of every row.
   const text = useMemo(() => stripHtml(message.text), [message.text]);
+  // Direction is per-bubble, not per-session. An English bot reply
+  // inside a Hebrew session was rendering RTL — gold dot on the right,
+  // text right-aligned, markdown headings flipped — because the
+  // previous check was `lang === "he"`. Detect Hebrew chars in THIS
+  // bubble's text instead. The `lang` prop is kept for the few
+  // structural fallbacks that still need it but no longer drives RTL.
+  const isRTL = useMemo(
+    () => /[֐-׿]/.test(text),
+    [text],
+  );
   // Image-only Layla messages render edge-to-edge (no gold dot, no
   // text-bubble padding) so the chart fills the chat width and feels
   // like a centerpiece, not a thumbnail tucked next to a paragraph.
@@ -94,6 +133,8 @@ export function Bubble({ message, onImagePress, lang = "en" }: Props) {
   }, []);
 
   if (isUser) {
+    // User pill: in LTR, hug the right edge; in RTL the user is on the
+    // left of the row. justifyContent flips accordingly.
     return (
       <Animated.View
         testID="bubble-user"
@@ -137,12 +178,59 @@ export function Bubble({ message, onImagePress, lang = "en" }: Props) {
     );
   }
 
+  // Long-press is gated to substantial completed bot bubbles — same
+  // threshold as the Listen pill, with chart-sigil headers excluded
+  // (those don't render well as a quote card). The host receives the
+  // stripped text so the card matches what the user sees on screen.
+  const shareEligible =
+    !message.streaming
+    && text.length >= PLAY_BUTTON_MIN_CHARS
+    && !isChartSigilBubble(text)
+    && !!onLongPressShare;
+  const handleLongPress = shareEligible
+    ? () => onLongPressShare!(text)
+    : undefined;
+
+  // Typewriter reveal for completed long bubbles (first-map sections,
+  // long chat replies that didn't stream). Disabled for sigil bubbles
+  // (planet-symbol writing-out reads as junk) and for anything that
+  // already streamed (the stream IS the reveal).
+  const typewriterEligible =
+    !message.streaming
+    && text.length >= TYPEWRITER_MIN_CHARS
+    && !isChartSigilBubble(text);
+  const { revealed, isRevealing, skip } = useTypewriter(
+    text,
+    message.id,
+    typewriterEligible,
+    !!message.streaming,
+  );
+  // Tap-to-skip is wired to the same outer Pressable used for share.
+  // While revealing, plain tap skips. After revealing, plain tap is a
+  // no-op (long-press still handles share where eligible).
+  const handlePress = isRevealing ? skip : undefined;
+
   return (
     <Animated.View
       testID={message.streaming ? "bubble-bot-streaming" : "bubble-bot"}
       style={[styles.row, { opacity: fade, transform: [{ translateY: lift }] }]}
     >
-      <View style={[styles.botRow, isRTL && styles.botRowRTL]}>
+      <Pressable
+        onPress={handlePress}
+        onLongPress={handleLongPress}
+        delayLongPress={550}
+        // Plain tap is a no-op except while typewriting (skip). Long
+        // press handles share when eligible. We never `disabled` the
+        // pressable so the typewriter-skip can always fire.
+        accessibilityHint={
+          isRevealing
+            ? "Tap to reveal the full message"
+            : shareEligible
+              ? "Long press to share this reading as a card"
+              : undefined
+        }
+        style={[styles.botRow, isRTL && styles.botRowRTL]}
+      >
         <Animated.View
           style={[styles.botDot, { transform: [{ scale: dotScale }] }]}
         />
@@ -170,41 +258,135 @@ export function Bubble({ message, onImagePress, lang = "en" }: Props) {
                 {text}
                 <Text style={styles.caret}>▍</Text>
               </Text>
+            ) : isRevealing ? (
+              // Typewriter reveal in progress. Render plain Text with a
+              // caret so partial markdown (mid-heading, mid-bold) doesn't
+              // render as broken syntax. When the reveal finishes, this
+              // branch falls through to the Markdown render below.
+              <Text style={[styles.botText, isRTL && styles.textRTL]}>
+                {revealed}
+                <Text style={styles.caret}>▍</Text>
+              </Text>
             ) : (
               // Completed bot message: render markdown so GPT's natural
               // headers (`### Sun in Pisces`), bold (`**term**`), and
               // bulleted lists become properly styled instead of showing
-              // raw syntax characters. For Hebrew, overlay RTL alignment
-              // on the body style.
+              // raw syntax characters. For Hebrew, apply RTL to every
+              // text-bearing markdown style — body alone wasn't enough
+              // for the chart-sigil bubble (tier headers, planet rows)
+              // and long sections (h2 titles, paragraphs, bullets).
               <Markdown
-                style={
-                  isRTL
-                    ? { ...markdownStyles, body: { ...markdownStyles.body, textAlign: "right", writingDirection: "rtl" } }
-                    : markdownStyles
-                }
+                style={isRTL ? rtlMarkdownStyles : markdownStyles}
               >
                 {text}
               </Markdown>
             )
           ) : null}
           {!message.streaming
+            && !isRevealing
             && text.length >= PLAY_BUTTON_MIN_CHARS
             && !isChartSigilBubble(text) ? (
-            <PlayButton text={text} />
+            <ActionBar text={text} />
           ) : null}
         </View>
-      </View>
+      </Pressable>
     </Animated.View>
   );
 }
 
 
-// ─── ▶ Listen affordance ──────────────────────────────────────────────────
+// ─── Message action bar ───────────────────────────────────────────────────
 //
-// Renders a small gold play/pause control under long bot bubbles. State
-// is owned by the playback module so multiple bubbles correctly reflect
-// "this one is playing right now". Tap-to-stop on the active bubble;
-// tap on a different bubble stops the active one and starts this one.
+// Renders a row of gold icon buttons under each substantial Layla bubble —
+// like the action row under a ChatGPT message. Order: Copy · Listen · 👍 ·
+// 👎 · Share. Listen keeps its label + visible state ("Playing…", "Loading…")
+// because the user needs to know whether their tap took. The other actions
+// fire-and-confirm via short toast-style "Copied" / "Thanks" labels that
+// fade out after ~1.4s.
+
+const ICON_SIZE = 17;
+const ICON_STROKE = 1.7;
+
+function CopyIcon({ color }: { color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M5 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+function ThumbsUpIcon({ filled, color }: { filled: boolean; color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 22V11M2 13v7a2 2 0 0 0 2 2h13.5a3 3 0 0 0 2.95-2.46l1.4-7A3 3 0 0 0 18.9 9H14V5a3 3 0 0 0-3-3l-4 9"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill={filled ? color : "none"}
+        fillOpacity={filled ? 0.18 : 0}
+      />
+    </Svg>
+  );
+}
+
+function ThumbsDownIcon({ filled, color }: { filled: boolean; color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M17 2v11M22 11V4a2 2 0 0 0-2-2H6.5a3 3 0 0 0-2.95 2.46l-1.4 7A3 3 0 0 0 5.1 15H10v4a3 3 0 0 0 3 3l4-9"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill={filled ? color : "none"}
+        fillOpacity={filled ? 0.18 : 0}
+      />
+    </Svg>
+  );
+}
+
+function ShareIcon({ color }: { color: string }) {
+  return (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3v13M8 7l4-4 4 4M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
+        stroke={color}
+        strokeWidth={ICON_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+function PlayGlyph({ playing }: { playing: boolean }) {
+  // Solid play/pause glyph in gold. Used inline next to the "Listen" /
+  // "Playing…" label so state is visible at a glance.
+  return playing ? (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24">
+      <Path d="M6 4h4v16H6zM14 4h4v16h-4z" fill={theme.accent} />
+    </Svg>
+  ) : (
+    <Svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24">
+      <Path d="M7 4v16l13-8Z" fill={theme.accent} />
+    </Svg>
+  );
+}
 
 function playButtonLabel(playing: boolean, busy: boolean, errLabel: string | null): string {
   if (playing) return "Playing…";
@@ -213,15 +395,18 @@ function playButtonLabel(playing: boolean, busy: boolean, errLabel: string | nul
   return "Listen";
 }
 
+type Vote = "up" | "down" | null;
 
-function PlayButton({ text }: { text: string }) {
+function ActionBar({ text }: { text: string }) {
   const cacheKey = useMemo(() => bubbleCacheKey(text), [text]);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Last error surfaced on the button label so failures don't go
-  // silent — better to show "TTS error" than have the user wonder
-  // why nothing's happening. Cleared on the next successful tap.
   const [errLabel, setErrLabel] = useState<string | null>(null);
+  const [vote, setVote] = useState<Vote>(null);
+  // Brief confirmation label ("Copied", "Thanks", "Noted") that fades
+  // in next to the action row, then fades out ~1.4s later. Keeps the
+  // bar from needing toasts or modal feedback.
+  const [confirm, setConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribePlaybackState((activeKey) => {
@@ -230,7 +415,14 @@ function PlayButton({ text }: { text: string }) {
     return unsubscribe;
   }, [cacheKey]);
 
-  const onPress = async () => {
+  // Auto-clear the transient confirmation chip.
+  useEffect(() => {
+    if (!confirm) return;
+    const t = setTimeout(() => setConfirm(null), 1400);
+    return () => clearTimeout(t);
+  }, [confirm]);
+
+  const onListen = async () => {
     if (busy) return;
     setErrLabel(null);
     const enabled = await getVoicePlaybackEnabled();
@@ -255,21 +447,211 @@ function PlayButton({ text }: { text: string }) {
     }
   };
 
+  const onCopy = async () => {
+    try {
+      await Clipboard.setStringAsync(text);
+      setConfirm("Copied");
+    } catch (e) {
+      console.warn("[copy] failed", e);
+      setConfirm("Copy failed");
+    }
+  };
+
+  const onShare = async () => {
+    try {
+      await Share.share(
+        Platform.OS === "ios" ? { message: text } : { message: text, title: "From Layla" },
+      );
+    } catch (e) {
+      // user-cancelled share counts as a no-op; iOS throws on dismiss
+      console.warn("[share] failed/cancelled", e);
+    }
+  };
+
+  const onVote = (next: Exclude<Vote, null>) => {
+    // Toggle off when re-tapping the same vote.
+    const final = vote === next ? null : next;
+    setVote(final);
+    if (final === "up") setConfirm("Thanks");
+    else if (final === "down") setConfirm("Noted");
+    else setConfirm(null);
+    // TODO(brain): when a feedback endpoint lands, POST {vote: final, text-hash}.
+    // For now the local state + console signal is enough to design around.
+    console.log("[feedback]", final, cacheKey);
+  };
+
+  const listenLabel = playButtonLabel(playing, busy, errLabel);
+  const goldDim = theme.accent;
+
+  return (
+    <View style={styles.actionRow}>
+      <ActionButton accessibilityLabel="Copy message" onPress={onCopy}>
+        <CopyIcon color={goldDim} />
+      </ActionButton>
+
+      <Pressable
+        onPress={onListen}
+        accessibilityRole="button"
+        accessibilityLabel={playing ? "Stop playback" : "Listen to this reading"}
+        accessibilityState={{ busy, selected: playing }}
+        style={({ pressed }) => [
+          styles.listenButton,
+          (playing || busy) && styles.listenButtonActive,
+          pressed && { opacity: 0.7 },
+        ]}
+      >
+        <PlayGlyph playing={playing} />
+        <Text style={styles.listenLabel}>{listenLabel}</Text>
+      </Pressable>
+
+      <ActionButton
+        accessibilityLabel="Good response"
+        onPress={() => onVote("up")}
+        selected={vote === "up"}
+      >
+        <ThumbsUpIcon filled={vote === "up"} color={goldDim} />
+      </ActionButton>
+
+      <ActionButton
+        accessibilityLabel="Bad response"
+        onPress={() => onVote("down")}
+        selected={vote === "down"}
+      >
+        <ThumbsDownIcon filled={vote === "down"} color={goldDim} />
+      </ActionButton>
+
+      <ActionButton accessibilityLabel="Share message" onPress={onShare}>
+        <ShareIcon color={goldDim} />
+      </ActionButton>
+
+      {confirm ? <Text style={styles.confirm}>{confirm}</Text> : null}
+    </View>
+  );
+}
+
+function ActionButton({
+  children,
+  onPress,
+  accessibilityLabel,
+  selected,
+}: {
+  children: React.ReactNode;
+  onPress: () => void;
+  accessibilityLabel: string;
+  selected?: boolean;
+}) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={playing ? "Stop playback" : "Listen to this reading"}
-      accessibilityState={{ busy, selected: playing }}
+      accessibilityLabel={accessibilityLabel}
       style={({ pressed }) => [
-        styles.playButton,
+        styles.iconButton,
+        selected && styles.iconButtonSelected,
         pressed && { opacity: 0.7 },
       ]}
+      hitSlop={4}
     >
-      <Text style={styles.playGlyph}>{playing ? "⏸" : "▶"}</Text>
-      <Text style={styles.playLabel}>{playButtonLabel(playing, busy, errLabel)}</Text>
+      {children}
     </Pressable>
   );
+}
+
+/**
+ * Typewriter reveal for a completed bot bubble. Returns the
+ * progressively-revealed text + a `skip` function that jumps to the
+ * end. Idempotent across re-mounts — once `messageId` has been
+ * revealed once, future calls return the full text immediately.
+ *
+ * `wasStreaming` short-circuits the reveal for bubbles that have
+ * already streamed in token-by-token — the LLM stream IS the reveal
+ * for those, no need to re-animate after the streaming caret turns off.
+ */
+function useTypewriter(
+  text: string,
+  messageId: string,
+  enabled: boolean,
+  wasStreaming: boolean,
+): { revealed: string; isRevealing: boolean; skip: () => void } {
+  // If this bubble streamed (now or in any past render), it stays
+  // settled — the user already watched it appear.
+  if (wasStreaming) STREAMED_BUBBLE_IDS.add(messageId);
+
+  // Lock the "should we typewriter this bubble?" decision at first
+  // mount. We CANNOT recompute it each render: the rAF chain runs
+  // `setRevealed(text.slice(0, len))` every ~16ms which re-renders
+  // this hook, and `REVEALED_BUBBLE_IDS.add(messageId)` inside the
+  // effect would flip a recomputed `shouldReveal` from true → false,
+  // changing the effect's deps, triggering cleanup which cancels the
+  // current rAF. The re-run would then `setRevealed(text)` — IF React
+  // flushed it in time. In concurrent mode + batching with the inflight
+  // rAF setRevealed, the cleanup-then-setRevealed sequence is racy and
+  // the bubble can land stuck on the partial text with the caret
+  // visible, recoverable only by tapping (which calls skip()).
+  const shouldRevealRef = useRef<boolean>(
+    enabled
+    && !STREAMED_BUBBLE_IDS.has(messageId)
+    && !REVEALED_BUBBLE_IDS.has(messageId),
+  );
+  const shouldReveal = shouldRevealRef.current;
+
+  const [revealed, setRevealed] = useState<string>(() =>
+    shouldReveal ? "" : text,
+  );
+  const skipRef = useRef(false);
+
+  useEffect(() => {
+    if (!shouldReveal) {
+      setRevealed(text);
+      return;
+    }
+    REVEALED_BUBBLE_IDS.add(messageId);
+    skipRef.current = false;
+
+    // Duration scales with length but stays inside the readable band.
+    // ~3.75ms/char baseline → 800 chars in 3s.
+    const duration = Math.min(
+      TYPEWRITER_MAX_DURATION_MS,
+      Math.max(TYPEWRITER_MIN_DURATION_MS, text.length * 3.75),
+    );
+    // Clamp to TARGET if length exceeds it so super-long bubbles still
+    // wrap within ~3-3.5s — readers should not have to wait > 5s for
+    // a bubble to settle.
+    const totalDuration = Math.min(duration, TYPEWRITER_TARGET_DURATION_MS + 1500);
+    const start = Date.now();
+    let rafId = 0;
+
+    const tick = () => {
+      if (skipRef.current) {
+        setRevealed(text);
+        return;
+      }
+      const elapsed = Date.now() - start;
+      const progress = Math.min(1, elapsed / totalDuration);
+      // Ease-out so the reveal slows toward the end — feels deliberate
+      // rather than mechanical.
+      const eased = 1 - Math.pow(1 - progress, 1.6);
+      const len = Math.floor(text.length * eased);
+      setRevealed(text.slice(0, len));
+      if (progress < 1) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        setRevealed(text);
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messageId]);
+
+  return {
+    revealed,
+    isRevealing: revealed.length < text.length,
+    skip: () => {
+      skipRef.current = true;
+      setRevealed(text);
+    },
+  };
 }
 
 function stripHtml(s: string): string {
@@ -295,12 +677,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
   },
-  // In Hebrew/RTL, the user pill anchors to the LEFT of the row.
+  // In Hebrew/RTL, the user (you) is on the LEFT of the row, mirroring the
+  // left-aligned user pill convention of native RTL chat apps (WhatsApp,
+  // iMessage Hebrew).
   rowUserRTL: {
     flexDirection: "row",
     justifyContent: "flex-start",
   },
   userBubbleRTL: {
+    // Pin the speech-tail corner to the bottom-LEFT so the pill mirrors
+    // the LTR variant.
     borderBottomRightRadius: theme.radius,
     borderBottomLeftRadius: 6,
   },
@@ -337,7 +723,8 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingRight: 28,
   },
-  // Flip the gold dot to the right edge in Hebrew/RTL.
+  // In Hebrew/RTL, flip the row so the gold dot leads at the right edge
+  // (where the reading eye starts) and the body breathes to the left.
   botRowRTL: {
     flexDirection: "row-reverse",
     paddingRight: 0,
@@ -388,32 +775,57 @@ const styles = StyleSheet.create({
     backgroundColor: "#15101A",
   },
   caret: { opacity: 0.5, color: theme.accent },
-  playButton: {
+  // ─── Action bar (copy · listen · 👍 · 👎 · share) ──────────────────────
+  actionRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    // align with the bubble's text inset; row hugs the leading edge.
     alignSelf: "flex-start",
-    gap: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginTop: 6,
-    borderRadius: 999,
-    borderWidth: 1,
+  },
+  iconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.borderStrong,
-    // Faint gold-tinted fill so the button reads as "Layla's voice" not a
-    // generic media control. Soft enough not to compete with the text
-    // it sits under.
+    backgroundColor: "rgba(212, 175, 90, 0.05)",
+  },
+  iconButtonSelected: {
+    backgroundColor: "rgba(212, 175, 90, 0.18)",
+    borderColor: theme.accent,
+  },
+  listenButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.borderStrong,
     backgroundColor: "rgba(212, 175, 90, 0.08)",
   },
-  playGlyph: {
-    color: theme.accent,
-    fontSize: 14,
-    lineHeight: 16,
+  listenButtonActive: {
+    borderColor: theme.accent,
+    backgroundColor: "rgba(212, 175, 90, 0.18)",
   },
-  playLabel: {
+  listenLabel: {
     color: theme.accent,
     fontSize: 13,
     fontWeight: "500",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
+  },
+  confirm: {
+    marginLeft: 6,
+    color: theme.accent,
+    fontSize: 12,
+    fontFamily: theme.fontSerif,
+    fontStyle: "italic",
+    opacity: 0.75,
   },
 });
 
@@ -463,13 +875,19 @@ const markdownStyles = {
     letterSpacing: 0.5,
   },
   heading3: {
+    // Used as a "section label" — appears on the chart-sigil bubble's
+    // tier headers (Luminaries / Personal / Social / Outer / Points)
+    // and occasionally on chat replies. Tracked-caps gold treatment
+    // gives the manuscript-page feel the brand calls for. Smaller than
+    // h1/h2 because it's a label, not a title.
     color: theme.accent,
-    fontSize: 17,
-    lineHeight: 24,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: "600" as const,
-    marginTop: 4,
-    marginBottom: 8,
-    letterSpacing: 0.25,
+    marginTop: 14,
+    marginBottom: 6,
+    letterSpacing: 2,
+    textTransform: "uppercase" as const,
   },
   heading4: {
     color: theme.accent,
@@ -534,5 +952,67 @@ const markdownStyles = {
   link: {
     color: theme.accent,
     textDecorationLine: "underline" as const,
+  },
+};
+
+// ─── RTL variant ──────────────────────────────────────────────────────────
+//
+// For Hebrew bubbles, apply textAlign: "right" + writingDirection: "rtl"
+// to every text-bearing markdown style. Body alone wasn't enough for the
+// chart-sigil bubble (tier headers + planet rows mixed glyphs/numbers
+// with Hebrew text) and the deep-read sections (h2 titles, paragraphs,
+// bullets). RN's bidi algorithm handles mixed-direction text fine when
+// the container's primary direction is set per style.
+const _rtl = <T extends object>(s: T): T => ({
+  ...s,
+  textAlign: "right",
+  writingDirection: "rtl",
+}) as unknown as T;
+
+const rtlMarkdownStyles = {
+  ...markdownStyles,
+  body: _rtl(markdownStyles.body),
+  paragraph: _rtl(markdownStyles.paragraph),
+  heading1: _rtl(markdownStyles.heading1),
+  heading2: _rtl(markdownStyles.heading2),
+  // Heading3 (tier labels on the chart bubble) needs an extra nudge —
+  // the textTransform: uppercase + letter-spacing 2 we use for the
+  // manuscript caps treatment was suppressing the writingDirection on
+  // some Hebrew strings. Drop both for RTL renders; Hebrew has no
+  // case + extra letter-spacing breaks bidi grouping for Hebrew chars.
+  heading3: {
+    ..._rtl(markdownStyles.heading3),
+    textTransform: "none" as const,
+    letterSpacing: 0.3,
+  },
+  heading4: _rtl(markdownStyles.heading4),
+  // strong + em both ultimately render Hebrew text inside a paragraph;
+  // the paragraph's writingDirection should cascade but RN inheritance
+  // for writingDirection is patchy. Set explicitly so bold "**עקרב**"
+  // doesn't drop back to LTR mid-line.
+  strong: _rtl(markdownStyles.strong),
+  em: _rtl(markdownStyles.em),
+  blockquote: {
+    ...markdownStyles.blockquote,
+    // Mirror the left rule to the right edge for RTL.
+    borderLeftWidth: 0,
+    borderRightWidth: 2,
+    borderRightColor: theme.accentDim,
+    paddingLeft: 0,
+    paddingRight: 12,
+  },
+  list_item: {
+    ..._rtl(markdownStyles.list_item),
+    flexDirection: "row-reverse" as const,
+  },
+  bullet_list_icon: {
+    ...markdownStyles.bullet_list_icon,
+    marginRight: 0,
+    marginLeft: 8,
+  },
+  ordered_list_icon: {
+    ...markdownStyles.ordered_list_icon,
+    marginRight: 0,
+    marginLeft: 8,
   },
 };

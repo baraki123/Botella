@@ -577,10 +577,23 @@ function useTypewriter(
   // settled — the user already watched it appear.
   if (wasStreaming) STREAMED_BUBBLE_IDS.add(messageId);
 
-  const shouldReveal =
-    enabled &&
-    !STREAMED_BUBBLE_IDS.has(messageId) &&
-    !REVEALED_BUBBLE_IDS.has(messageId);
+  // Lock the "should we typewriter this bubble?" decision at first
+  // mount. We CANNOT recompute it each render: the rAF chain runs
+  // `setRevealed(text.slice(0, len))` every ~16ms which re-renders
+  // this hook, and `REVEALED_BUBBLE_IDS.add(messageId)` inside the
+  // effect would flip a recomputed `shouldReveal` from true → false,
+  // changing the effect's deps, triggering cleanup which cancels the
+  // current rAF. The re-run would then `setRevealed(text)` — IF React
+  // flushed it in time. In concurrent mode + batching with the inflight
+  // rAF setRevealed, the cleanup-then-setRevealed sequence is racy and
+  // the bubble can land stuck on the partial text with the caret
+  // visible, recoverable only by tapping (which calls skip()).
+  const shouldRevealRef = useRef<boolean>(
+    enabled
+    && !STREAMED_BUBBLE_IDS.has(messageId)
+    && !REVEALED_BUBBLE_IDS.has(messageId),
+  );
+  const shouldReveal = shouldRevealRef.current;
 
   const [revealed, setRevealed] = useState<string>(() =>
     shouldReveal ? "" : text,
@@ -629,7 +642,7 @@ function useTypewriter(
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messageId, shouldReveal]);
+  }, [messageId]);
 
   return {
     revealed,
