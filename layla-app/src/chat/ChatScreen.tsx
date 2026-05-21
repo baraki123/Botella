@@ -103,6 +103,13 @@ export interface ChatScreenProps {
    * brain pins that person as the chat's focus for that one turn.
    * Used by "Talk to Layla about Maya" from the Orbit detail view. */
   pendingFocusPersonId?: string | null;
+  /** When set, ChatScreen sends a pure callback frame (no text bubble)
+   * over the WS as soon as the connection is open. Used by the Settings
+   * "Conversation" rows that replaced the retired slash commands —
+   * tapping "Re-do my map" queues "__redo_map" here, returns the user
+   * to chat, and the brain's callback trigger handles it identically
+   * to the old /newchart slash command. */
+  pendingCallback?: string | null;
   onPendingConsumed?: () => void;
 }
 
@@ -111,6 +118,7 @@ export function ChatScreen({
   onOpenPeople,
   pendingMessage,
   pendingFocusPersonId,
+  pendingCallback,
   onPendingConsumed,
 }: ChatScreenProps = {}) {
   const [session, setSession] = useState<Session | null>(null);
@@ -345,6 +353,19 @@ export function ChatScreen({
     onPendingConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingMessage, pendingFocusPersonId, status]);
+
+  // Pure-callback pending (from Settings "Conversation" rows). Unlike
+  // pendingMessage, this fires WITHOUT a user text bubble — the brain's
+  // callback-trigger matcher runs as if a chip was tapped. Used by the
+  // retired-slash-command replacements (__redo_map, __reread_map,
+  // __add_person, __link_telegram).
+  useEffect(() => {
+    if (!pendingCallback) return;
+    if (status !== "open") return;
+    streamRef.current?.send({ callback_data: pendingCallback });
+    onPendingConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCallback, status]);
 
   // When a long bot bubble lands (first-map section, deep chat reply,
   // etc.) the user needs the full screen to read. If the keyboard is

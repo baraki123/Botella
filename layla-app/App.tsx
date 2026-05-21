@@ -27,6 +27,11 @@ export default function App() {
   // frame so the brain's free_chat pins Maya as the turn's focus.
   // Cleared together with the message via onPendingConsumed.
   const [pendingFocusPersonId, setPendingFocusPersonId] = useState<string | null>(null);
+  // Pure-callback queue. Used by Settings → Conversation rows
+  // (Re-do my map / Re-read my map / Add to Orbit) which replaced the
+  // retired slash commands. Fires WITHOUT a user-text bubble — the
+  // brain's callback-trigger matcher handles it directly.
+  const [pendingCallback, setPendingCallback] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,9 +87,11 @@ export default function App() {
           onOpenPeople={() => setRoute("people")}
           pendingMessage={pendingChatMessage}
           pendingFocusPersonId={pendingFocusPersonId}
+          pendingCallback={pendingCallback}
           onPendingConsumed={() => {
             setPendingChatMessage(null);
             setPendingFocusPersonId(null);
+            setPendingCallback(null);
           }}
         />
         {route === "settings" ? (
@@ -92,6 +99,10 @@ export default function App() {
             <SettingsScreen
               onSignedOut={handleSignedOut}
               onClose={() => setRoute("chat")}
+              onSendCallback={(callback_data) => {
+                setPendingCallback(callback_data);
+                setRoute("chat");
+              }}
             />
           </View>
         ) : null}

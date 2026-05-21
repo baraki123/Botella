@@ -62,9 +62,15 @@ export interface SettingsScreenProps {
   onAccountSwitched?: () => void;
   /** Called when the user taps the back button to return to the chat. */
   onClose?: () => void;
+  /** Fire a pure callback frame over the chat WS. Used by the
+   * "Conversation" rows (Re-do my map, Re-read my map, Add to Orbit)
+   * which used to be slash-commands. The host (App.tsx) queues the
+   * callback to fire on the next chat mount and switches the route
+   * back to chat so the user sees Layla's response. */
+  onSendCallback?: (callback_data: string) => void;
 }
 
-export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: SettingsScreenProps) {
+export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose, onSendCallback }: SettingsScreenProps) {
   const [provider, setProvider] = useState<string | null>(null);
   const [busy, setBusy] = useState<
     "signout" | "delete" | "link" | "tg-link" | null
@@ -327,6 +333,36 @@ export function SettingsScreen({ onSignedOut, onAccountSwitched, onClose }: Sett
           in a soft, warm voice (uses your data plan).
         </Text>
       </Section>
+
+      {onSendCallback ? (
+        <Section title="Conversation">
+          <ActionRow
+            label="Re-read my map"
+            onPress={() => onSendCallback("__reread_map")}
+          />
+          <ActionRow
+            label="Re-do my map"
+            onPress={() => {
+              Alert.alert(
+                "Re-do your map?",
+                "We'll start a fresh birth-data flow. Your Orbit and notes stay; your current chart will be replaced.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Start over",
+                    style: "destructive",
+                    onPress: () => onSendCallback("__redo_map"),
+                  },
+                ],
+              );
+            }}
+          />
+          <ActionRow
+            label="Add someone to my Orbit"
+            onPress={() => onSendCallback("__add_person")}
+          />
+        </Section>
+      ) : null}
 
       <Section title="About">
         <ActionRow label="Privacy policy" onPress={() => Linking.openURL(PRIVACY_URL)} />
