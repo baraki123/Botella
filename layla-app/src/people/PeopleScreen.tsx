@@ -41,6 +41,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -74,12 +75,17 @@ export function PeopleScreen({ jwt, onClose, onSendToChat }: PeopleScreenProps) 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Server-projected user lang ("en" | "he"). Used so the re-share
+  // CTA on PersonDetailView renders in the user's language without
+  // an extra /v1/me round-trip.
+  const [lang, setLang] = useState<string>("en");
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      const list = await fetchOrbit(jwt);
-      setPeople(list);
+      const res = await fetchOrbit(jwt);
+      setPeople(res.people);
+      setLang(res.lang);
     } catch (e: any) {
       setError(e?.message || "Couldn't reach your Orbit right now.");
       setPeople([]);
@@ -150,6 +156,7 @@ export function PeopleScreen({ jwt, onClose, onSendToChat }: PeopleScreenProps) 
     return (
       <PersonDetailView
         person={selected}
+        lang={lang}
         onBack={() => setSelectedId(null)}
         onDelete={() => handleDelete(selected)}
         onTalkAbout={() => handleTalkAbout(selected)}
@@ -523,13 +530,41 @@ function AddOrbitButton({ onPress }: { onPress: () => void }) {
 
 // ─── Detail view ───────────────────────────────────────────────────────────
 
+/** Build the share-sheet message for a stub person.
+ *
+ * Mirrors the brain-side `_build_invite_share` template in
+ * GombiStar/botella_manifest.py so the re-share affordance feels
+ * identical to the original chat-chip message. Two short copies (en
+ * + he) is cheaper than another round-trip just to fetch the string. */
+function buildInviteShareText(
+  personName: string,
+  inviteUrl: string,
+  lang: string,
+): string {
+  if (lang === "he") {
+    return (
+      `היי ${personName}, אני משתמש/ת בלילה — יועצת אסטרולוגית ` +
+      `שמכירה את המפה שלי ואת האנשים שחשובים לי. כבר מיפיתי ` +
+      `את הכוכבים שלך ✨ הקש/י כדי להצטרף:\n\n${inviteUrl}`
+    );
+  }
+  return (
+    `Hi ${personName}, I'm using Layla — an astrology advisor ` +
+    `that knows my chart and the people who matter to me. I ` +
+    `already mapped your stars ✨ Tap to come find me there:\n\n${inviteUrl}`
+  );
+}
+
 function PersonDetailView({
   person,
+  lang,
   onBack,
   onDelete,
   onTalkAbout,
 }: {
   person: OrbitPerson;
+  /** User's preferred language; controls the re-share CTA copy. */
+  lang: string;
   onBack: () => void;
   onDelete: () => void;
   onTalkAbout: () => void;
@@ -656,6 +691,26 @@ function PersonDetailView({
               label={`Talk to Layla about ${person.name}`}
               onPress={onTalkAbout}
             />
+            {person.invite_url ? (
+              <TalkCTA
+                label={
+                  lang === "he"
+                    ? `✦ לשלוח ל-${person.name} את הקישור`
+                    : `✦ Send ${person.name} the link`
+                }
+                onPress={() => {
+                  Share.share({
+                    message: buildInviteShareText(
+                      person.name,
+                      person.invite_url || "",
+                      lang,
+                    ),
+                  }).catch(() => {
+                    // User cancelled or share unavailable — fine, no-op.
+                  });
+                }}
+              />
+            ) : null}
             <Pressable
               onPress={confirmAndDelete}
               style={({ pressed }) => [

@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -646,6 +647,21 @@ export function ChatScreen({
         ),
       );
       advancePaginatedRead();
+      return;
+    }
+    // Invite-share intercept: the chip's value contains the full
+    // pre-built share message (everything after the `__invite_share:`
+    // prefix). Hand it to the iOS system Share sheet — no WS send,
+    // no user bubble. The user picks WhatsApp / SMS / Email / Mail
+    // and the recipient gets a self-contained message + tappable
+    // `layla://invite/<token>` URL. Chip stays on the bubble (the
+    // user might want to share again to a different contact), only
+    // the invite message disappears from chat.
+    if (sendValue.startsWith("__invite_share:")) {
+      const message = sendValue.slice("__invite_share:".length);
+      Share.share({ message }).catch(() => {
+        // User cancelled or share unavailable — both fine, no-op.
+      });
       return;
     }
     // Remove the chips so they can't be tapped twice. (URL-form chips

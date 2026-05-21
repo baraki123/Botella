@@ -38,15 +38,31 @@ export interface OrbitPerson {
   synastry_aspects: OrbitPersonSynastryAspect[];
   created_at: string;
   updated_at: string;
+  /** Invite link minted when this person was added (or post-add).
+   * Empty string if no token has been minted yet. iOS PersonDetailView
+   * uses this to render the "Send NAME the link" share CTA. */
+  invite_url?: string;
+  invite_token?: string;
 }
 
-export async function fetchOrbit(jwt: string): Promise<OrbitPerson[]> {
+export interface OrbitFetchResult {
+  /** User's preferred language (server-projected from session record).
+   * "en" | "he" today; falls back to "en" for users whose record predates
+   * the lang field. iOS uses this to render share-CTA copy correctly. */
+  lang: string;
+  people: OrbitPerson[];
+}
+
+export async function fetchOrbit(jwt: string): Promise<OrbitFetchResult> {
   const r = await fetch(`${product.apiUrl}/v1/orbit`, {
     headers: { Authorization: `Bearer ${jwt}` },
   });
   if (!r.ok) throw new Error(`fetch orbit failed: ${r.status}`);
-  const j = (await r.json()) as { people?: OrbitPerson[] };
-  return Array.isArray(j?.people) ? j.people : [];
+  const j = (await r.json()) as { lang?: string; people?: OrbitPerson[] };
+  return {
+    lang: j?.lang === "he" ? "he" : "en",
+    people: Array.isArray(j?.people) ? j.people : [],
+  };
 }
 
 export async function deleteOrbitPerson(jwt: string, id: string): Promise<void> {
