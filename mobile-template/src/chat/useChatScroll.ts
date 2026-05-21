@@ -32,13 +32,23 @@
  * ║                                                                  ║
  * ║      Smart-snap fires only while the user is at-bottom           ║
  * ║      (isAtBottomRef true) and hasn't dragged away                ║
- * ║      (userOverrideRef false). It fires for new-bubble arrival,   ║
- * ║      streaming token growth on the latest bubble, viewport       ║
- * ║      shrink (keyboard rise / chip-row appear), AND keyboard      ║
- * ║      show/hide. Bulk message arrivals (session restore /        ║
- * ║      history load) bypass smart-snap and use plain scrollToEnd  ║
- * ║      — the user wants to be at the bottom of the loaded thread, ║
- * ║      not at the top of the first message.                       ║
+ * ║      (userOverrideRef false). The trigger is bubble ARRIVAL —   ║
+ * ║      a new item appended to the message list. Case A vs Case B ║
+ * ║      is decided at arrival time against the bubble's height as ║
+ * ║      it first lands. Bulk message arrivals (session restore /  ║
+ * ║      history load) bypass smart-snap and use plain scrollToEnd ║
+ * ║      — the user wants to be at the bottom of the loaded thread,║
+ * ║      not at the top of the first message.                      ║
+ * ║                                                                  ║
+ * ║      Once a bubble has landed, INCREMENTAL height changes on    ║
+ * ║      that same bubble (typewriter reveal of long text, chip-    ║
+ * ║      row attaching via the empty-prompt path, deep-read footer  ║
+ * ║      animations) DO NOT re-run snap. They sticky-bottom — i.e. ║
+ * ║      if the user is still at-bottom, scrollToEnd; otherwise     ║
+ * ║      leave them alone. Re-running snap here would yank the user║
+ * ║      back to the bubble's top mid-read (Case B), making a long║
+ * ║      typewriter bubble look like "one line + cursor" while text║
+ * ║      streams into the area below the viewport.                  ║
  * ║                                                                  ║
  * ║   3. The "↓ Latest" pill surfaces ONLY when the user has         ║
  * ║      actively scrolled MORE THAN ONE FULL VIEWPORT above the     ║
@@ -329,17 +339,24 @@ export function useChatScroll<T extends MinimalMessage>(
         );
         return;
       }
-      // Distinguish bubble-arrival vs footer-only height changes:
+      // Distinguish bubble-arrival vs incremental-growth height
+      // changes:
       //   · New bubble this render → snap (Case A/B as usual). The
-      //     reader expects the new content to be in view.
-      //   · Only the footer height changed (typing indicator
-      //     mount/unmount, deep-read mode swap-in, label cycle) →
-      //     ONLY snap if the user is currently at the bottom. A reader
-      //     scrolling through the chart sigil shouldn't be yanked
-      //     back when the typing indicator's progress bar fades in.
+      //     reader expects the new block to be framed correctly.
+      //   · Same bubble grew (typewriter reveal expanding a long bot
+      //     bubble line by line, chips attaching to the previous bot
+      //     bubble via the empty-prompt path, typing indicator
+      //     mount/unmount, deep-read footer cycles) → sticky-bottom
+      //     ONLY. Snap-to-top here would jerk a reader away from
+      //     content they are watching grow, which is exactly the
+      //     "only one line + cursor" bug the typewriter exhibited
+      //     when its bubble crossed the viewport threshold mid-reveal.
       const isNewBubble = pendingNewBubbleRef.current;
       pendingNewBubbleRef.current = false;
-      if (!isNewBubble && !isAtBottomRef.current) {
+      if (!isNewBubble) {
+        if (isAtBottomRef.current) {
+          listRef.current?.scrollToEnd({ animated: true });
+        }
         return;
       }
       snapToLatest(true);
