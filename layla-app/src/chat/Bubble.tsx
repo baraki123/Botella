@@ -22,20 +22,17 @@ import type { Message } from "./types";
 // new bubbles to prefetch TTS audio for.
 export const PLAY_BUTTON_MIN_CHARS = 220;
 
-// Typewriter reveal kicks in on long completed bot bubbles. Tuned so a
-// typical section (~800 chars) reveals in ~3 seconds — fast enough to
-// not feel laborious, slow enough to read "Layla is writing." Tap the
-// bubble to skip to the full text instantly.
-const TYPEWRITER_MIN_CHARS = 240;
-const TYPEWRITER_TARGET_DURATION_MS = 3000;
-const TYPEWRITER_MIN_DURATION_MS = 900;
-const TYPEWRITER_MAX_DURATION_MS = 4500;
-
-// Module-scope ID sets so component re-mounts (list virtualization, key
-// reuse) don't replay the typewriter. Once a message has been streamed
-// OR fully revealed once, it stays settled forever.
-const STREAMED_BUBBLE_IDS = new Set<string>();
-const REVEALED_BUBBLE_IDS = new Set<string>();
+// Stream-end cross-fade — Text+caret → Markdown handoff timing. Total
+// 220ms (110ms fade-out + 110ms fade-in) reads as a single smooth
+// transition; the eye doesn't perceive the underlying render-tree
+// swap because the bubble passes through 0-opacity mid-cycle.
+const STREAM_SETTLE_FADE_MS = 110;
+// Delay before the ActionBar (Copy / Listen / 👍 / 👎 / Share) fades in
+// after the caret fades out. Sequencing reads as "Layla finished
+// speaking → here are your options" instead of popping everything
+// at once.
+const ACTION_BAR_REVEAL_DELAY_MS = 80;
+const ACTION_BAR_REVEAL_MS = 240;
 
 // The chart-sigil bubble emitted right after onboarding ("Avi — your
 // chart's ready. ☀ Aries Sun · ☾ Leo Moon · …") crosses the 220-char
@@ -191,24 +188,105 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
     ? () => onLongPressShare!(text)
     : undefined;
 
-  // Typewriter reveal for completed long bubbles (first-map sections,
-  // long chat replies that didn't stream). Disabled for sigil bubbles
-  // (planet-symbol writing-out reads as junk) and for anything that
-  // already streamed (the stream IS the reveal).
-  const typewriterEligible =
+  // Stream-end cross-fade. While streaming we render Text + caret
+  // (plain text, fast, no markdown re-parse on every token). When
+  // message.streaming flips to false, we fade the Text layer out
+  // (110ms), swap to the Markdown render, then fade it in (110ms).
+  // Total ~220ms reads as one smooth transition — the swap is
+  // invisible because the bubble passes through 0 opacity mid-cycle.
+  //
+  // The previous render-time conditional `streaming ? Text : Markdown`
+  // produced a single-frame layout reflow at the swap (paragraph
+  // spacing + bold/heading styles all rebalanced). The crossfade
+  // pre-mounts both layers and animates between them.
+  const wasStreamingRef = useRef<boolean>(!!message.streaming);
+  // Anim driving the Text→Markdown handoff. 0 = full Text, 1 = full
+  // Markdown. Bubbles that LAND non-streaming (typical paginated_read
+  // section, chip ack) start at 1 — no fade needed.
+  const settleAnim = useRef(
+    new Animated.Value(message.streaming ? 0 : 1),
+  ).current;
+  // Caret blink. While streaming, opacity loops 1.0 → 0.2 → 1.0 at
+  // ~1Hz. At stream end, settle handoff also drives a fade-to-zero
+  // on the caret (it lives inside the Text layer that fades to 0).
+  const caretBlink = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (reduced || !message.streaming) {
+      caretBlink.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(caretBlink, {
+          toValue: 0.2,
+          duration: 290,
+          useNativeDriver: true,
+        }),
+        Animated.timing(caretBlink, {
+          toValue: 1,
+          duration: 290,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [message.streaming, reduced, caretBlink]);
+  // Drive the settle handoff when streaming transitions true → false.
+  // Sequence: fade Text out (110ms) → swap is now invisible → fade
+  // Markdown in (110ms).
+  useEffect(() => {
+    if (wasStreamingRef.current && !message.streaming) {
+      if (reduced) {
+        settleAnim.setValue(1);
+      } else {
+        Animated.timing(settleAnim, {
+          toValue: 1,
+          duration: STREAM_SETTLE_FADE_MS * 2,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+    wasStreamingRef.current = !!message.streaming;
+  }, [message.streaming, reduced, settleAnim]);
+
+  // ActionBar sequenced reveal — fades in AFTER the settle handoff,
+  // with a small gap so it reads as "Layla finished speaking → here
+  // are your options" rather than popping. Bubbles that land already
+  // settled (paginated_read sections, chip acks) get the full reveal
+  // sequenced off the row's own mount fade.
+  const actionBarOpacity = useRef(
+    new Animated.Value(message.streaming ? 0 : reduced ? 1 : 0),
+  ).current;
+  useEffect(() => {
+    if (message.streaming) return;
+    if (reduced) {
+      actionBarOpacity.setValue(1);
+      return;
+    }
+    const id = setTimeout(() => {
+      Animated.timing(actionBarOpacity, {
+        toValue: 1,
+        duration: ACTION_BAR_REVEAL_MS,
+        useNativeDriver: true,
+      }).start();
+    }, STREAM_SETTLE_FADE_MS * 2 + ACTION_BAR_REVEAL_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [message.streaming, reduced, actionBarOpacity]);
+
+  // Render flags. `showStreamLayer` is true while caret/Text is at
+  // any opacity; we keep it mounted until the cross-fade fully lands
+  // on Markdown so there's no flash of empty space mid-handoff.
+  const showStreamLayer = message.streaming
+    // settleAnim 0 = full Text, 1 = full Markdown. Keep the Text
+    // layer mounted while opacity is still > 0; React-Native lacks
+    // a clean "onAnimationEnd" so we just mount both layers and
+    // let opacity drive visibility.
+    || wasStreamingRef.current === true;
+  const showActionBar =
     !message.streaming
-    && text.length >= TYPEWRITER_MIN_CHARS
+    && text.length >= PLAY_BUTTON_MIN_CHARS
     && !isChartSigilBubble(text);
-  const { revealed, isRevealing, skip } = useTypewriter(
-    text,
-    message.id,
-    typewriterEligible,
-    !!message.streaming,
-  );
-  // Tap-to-skip is wired to the same outer Pressable used for share.
-  // While revealing, plain tap skips. After revealing, plain tap is a
-  // no-op (long-press still handles share where eligible).
-  const handlePress = isRevealing ? skip : undefined;
 
   return (
     <Animated.View
@@ -216,18 +294,12 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
       style={[styles.row, { opacity: fade, transform: [{ translateY: lift }] }]}
     >
       <Pressable
-        onPress={handlePress}
         onLongPress={handleLongPress}
         delayLongPress={550}
-        // Plain tap is a no-op except while typewriting (skip). Long
-        // press handles share when eligible. We never `disabled` the
-        // pressable so the typewriter-skip can always fire.
         accessibilityHint={
-          isRevealing
-            ? "Tap to reveal the full message"
-            : shareEligible
-              ? "Long press to share this reading as a card"
-              : undefined
+          shareEligible
+            ? "Long press to share this reading as a card"
+            : undefined
         }
         style={[styles.botRow, isRTL && styles.botRowRTL]}
       >
@@ -250,43 +322,51 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
             </Pressable>
           ) : null}
           {text ? (
-            message.streaming ? (
-              // Streaming chat replies: keep plain Text + caret for the
-              // tight token-tail UX. Markdown library can't easily append
-              // a non-markdown caret element mid-render.
-              <Text style={[styles.botText, isRTL && styles.textRTL]}>
-                {text}
-                <Text style={styles.caret}>▍</Text>
-              </Text>
-            ) : isRevealing ? (
-              // Typewriter reveal in progress. Render plain Text with a
-              // caret so partial markdown (mid-heading, mid-bold) doesn't
-              // render as broken syntax. When the reveal finishes, this
-              // branch falls through to the Markdown render below.
-              <Text style={[styles.botText, isRTL && styles.textRTL]}>
-                {revealed}
-                <Text style={styles.caret}>▍</Text>
-              </Text>
-            ) : (
-              // Completed bot message: render markdown so GPT's natural
-              // headers (`### Sun in Pisces`), bold (`**term**`), and
-              // bulleted lists become properly styled instead of showing
-              // raw syntax characters. For Hebrew, apply RTL to every
-              // text-bearing markdown style — body alone wasn't enough
-              // for the chart-sigil bubble (tier headers, planet rows)
-              // and long sections (h2 titles, paragraphs, bullets).
-              <Markdown
-                style={isRTL ? rtlMarkdownStyles : markdownStyles}
-              >
-                {text}
-              </Markdown>
-            )
+            <View>
+              {/* Markdown layer — the settled render. Fades IN over
+                  the second half of the cross-fade. For non-streaming
+                  bubbles, settleAnim starts at 1 so this is just the
+                  full render. */}
+              <Animated.View style={{ opacity: settleAnim }}>
+                <Markdown style={isRTL ? rtlMarkdownStyles : markdownStyles}>
+                  {text}
+                </Markdown>
+              </Animated.View>
+              {/* Streaming Text+caret layer — overlaid absolutely so
+                  the cross-fade doesn't cause two stacked heights to
+                  fight for layout. Only mounts when the bubble has
+                  ever been streaming. The opacity interpolates the
+                  inverse of settleAnim so it fades OUT as Markdown
+                  fades IN. */}
+              {showStreamLayer ? (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    StyleSheet.absoluteFill,
+                    {
+                      opacity: settleAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [1, 0],
+                      }),
+                    },
+                  ]}
+                >
+                  <Text style={[styles.botText, isRTL && styles.textRTL]}>
+                    {text}
+                    <Animated.Text
+                      style={[styles.caret, { opacity: caretBlink }]}
+                    >
+                      |
+                    </Animated.Text>
+                  </Text>
+                </Animated.View>
+              ) : null}
+            </View>
           ) : null}
-          {!message.streaming
-            && !isRevealing
-            && text.length >= PLAY_BUTTON_MIN_CHARS
-            && !isChartSigilBubble(text) ? (
-            <ActionBar text={text} />
+          {showActionBar ? (
+            <Animated.View style={{ opacity: actionBarOpacity }}>
+              <ActionBar text={text} />
+            </Animated.View>
           ) : null}
         </View>
       </Pressable>
@@ -555,119 +635,6 @@ function ActionButton({
       {children}
     </Pressable>
   );
-}
-
-/**
- * Typewriter reveal for a completed bot bubble. Returns the
- * progressively-revealed text + a `skip` function that jumps to the
- * end. Idempotent across re-mounts — once `messageId` has been
- * revealed once, future calls return the full text immediately.
- *
- * `wasStreaming` short-circuits the reveal for bubbles that have
- * already streamed in token-by-token — the LLM stream IS the reveal
- * for those, no need to re-animate after the streaming caret turns off.
- */
-function useTypewriter(
-  text: string,
-  messageId: string,
-  enabled: boolean,
-  wasStreaming: boolean,
-): { revealed: string; isRevealing: boolean; skip: () => void } {
-  // If this bubble streamed (now or in any past render), it stays
-  // settled — the user already watched it appear.
-  if (wasStreaming) STREAMED_BUBBLE_IDS.add(messageId);
-
-  // Lock the "should we typewriter this bubble?" decision at first
-  // mount. We CANNOT recompute it each render: the rAF chain runs
-  // `setRevealed(text.slice(0, len))` every ~16ms which re-renders
-  // this hook, and `REVEALED_BUBBLE_IDS.add(messageId)` inside the
-  // effect would flip a recomputed `shouldReveal` from true → false,
-  // changing the effect's deps, triggering cleanup which cancels the
-  // current rAF. The re-run would then `setRevealed(text)` — IF React
-  // flushed it in time. In concurrent mode + batching with the inflight
-  // rAF setRevealed, the cleanup-then-setRevealed sequence is racy and
-  // the bubble can land stuck on the partial text with the caret
-  // visible, recoverable only by tapping (which calls skip()).
-  const shouldRevealRef = useRef<boolean>(
-    enabled
-    && !STREAMED_BUBBLE_IDS.has(messageId)
-    && !REVEALED_BUBBLE_IDS.has(messageId),
-  );
-  const shouldReveal = shouldRevealRef.current;
-
-  const [revealed, setRevealed] = useState<string>(() =>
-    shouldReveal ? "" : text,
-  );
-  const skipRef = useRef(false);
-
-  // When the bubble is NOT typewritering (already-revealed, streaming,
-  // or short), mirror `revealed` to the live `text`. Without this,
-  // a streaming bubble's `revealed` would freeze at the first chunk
-  // captured by useState's initializer — and once message.streaming
-  // flips to false, the render switches from the streaming branch
-  // (uses live `text`) to the typewriter branch (uses stale `revealed`),
-  // making the bubble visibly "shrink" back to the first chunk + caret
-  // until the user taps to skip. We only run this sync when the
-  // typewriter is OFF — during a real reveal, the typewriter owns
-  // `revealed` and we don't fight it.
-  useEffect(() => {
-    if (!shouldRevealRef.current) {
-      setRevealed(text);
-    }
-  }, [text]);
-
-  useEffect(() => {
-    if (!shouldReveal) {
-      setRevealed(text);
-      return;
-    }
-    REVEALED_BUBBLE_IDS.add(messageId);
-    skipRef.current = false;
-
-    // Duration scales with length but stays inside the readable band.
-    // ~3.75ms/char baseline → 800 chars in 3s.
-    const duration = Math.min(
-      TYPEWRITER_MAX_DURATION_MS,
-      Math.max(TYPEWRITER_MIN_DURATION_MS, text.length * 3.75),
-    );
-    // Clamp to TARGET if length exceeds it so super-long bubbles still
-    // wrap within ~3-3.5s — readers should not have to wait > 5s for
-    // a bubble to settle.
-    const totalDuration = Math.min(duration, TYPEWRITER_TARGET_DURATION_MS + 1500);
-    const start = Date.now();
-    let rafId = 0;
-
-    const tick = () => {
-      if (skipRef.current) {
-        setRevealed(text);
-        return;
-      }
-      const elapsed = Date.now() - start;
-      const progress = Math.min(1, elapsed / totalDuration);
-      // Ease-out so the reveal slows toward the end — feels deliberate
-      // rather than mechanical.
-      const eased = 1 - Math.pow(1 - progress, 1.6);
-      const len = Math.floor(text.length * eased);
-      setRevealed(text.slice(0, len));
-      if (progress < 1) {
-        rafId = requestAnimationFrame(tick);
-      } else {
-        setRevealed(text);
-      }
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messageId]);
-
-  return {
-    revealed,
-    isRevealing: revealed.length < text.length,
-    skip: () => {
-      skipRef.current = true;
-      setRevealed(text);
-    },
-  };
 }
 
 function stripHtml(s: string): string {

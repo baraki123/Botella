@@ -185,7 +185,28 @@ export function ChatScreen({
   // Do NOT add ad-hoc scroll calls in this file — extend the hook in
   // mobile-template/ and copy.
   const scroll = useChatScroll<Message>(messages);
-  const { listRef, pillOpacity, jumpToLatest } = scroll;
+  const { listRef, pillOpacity, jumpToLatest, setStreamActive } = scroll;
+  // Debounce flipping setStreamActive(false) — when the brain emits
+  // `complete` then immediately starts a chip/quick_replies/text in
+  // the same handler tick, we want the scroll hook to stay in
+  // streaming mode through that tail so the rAF-coalesced scroll
+  // catches the final chip-row attach without re-engaging the
+  // animated scrollToEnd that would wobble.
+  const streamEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Timestamp of the most recent bot text/complete event. Used by
+  // the `text` handler when `event.payload.coalesce === true` is set:
+  // if the previous bot message landed within the last 300ms, the
+  // new text is appended to it instead of creating a new message —
+  // collapses a "one Layla turn = multiple text() yields" chain into
+  // one visual message (Claude-style). Opt-in per text() callsite.
+  const lastBotLandedAtRef = useRef<number>(0);
+  const armStreamSettle = useCallback(() => {
+    if (streamEndTimerRef.current) clearTimeout(streamEndTimerRef.current);
+    streamEndTimerRef.current = setTimeout(() => {
+      setStreamActive(false);
+      streamEndTimerRef.current = null;
+    }, 300);
+  }, [setStreamActive]);
 
   // The chips that are CURRENTLY actionable, rendered in a sticky row
   // above the Composer. Show only when the latest message is a bot
@@ -433,13 +454,43 @@ export function ChatScreen({
         return;
 
       case "text": {
-        // Plain text bot message.
+        // Plain text bot message. The brain can set
+        // `payload.coalesce === true` to merge this text into the
+        // previous bot message when the previous one settled within
+        // the last 300ms — used for "one Layla turn" rendering
+        // (Claude-style) of multi-line post-save chains. Default is
+        // false (current behavior: each text event = its own message)
+        // so existing flows are unchanged until a callsite opts in.
         setShowTyping(false);
-        const id = uid();
-        setMessages((m) => [
-          ...m,
-          { id, role: "bot", text: event.payload.text || "" },
-        ]);
+        const incoming = event.payload.text || "";
+        const coalesce = event.payload.coalesce === true;
+        const now = Date.now();
+        setMessages((m) => {
+          if (coalesce && m.length > 0) {
+            const last = m[m.length - 1];
+            const lastLanded = lastBotLandedAtRef.current;
+            const withinWindow = lastLanded > 0 && now - lastLanded < 300;
+            if (
+              last.role === "bot"
+              && !last.streaming
+              && withinWindow
+            ) {
+              // Append with a paragraph break — the new text reads as
+              // a continuation of the prior message, not a stuck-on
+              // afterthought.
+              const sep = last.text.endsWith("\n") ? "" : "\n\n";
+              const next = m.slice();
+              next[next.length - 1] = {
+                ...last,
+                text: last.text + sep + incoming,
+              };
+              lastBotLandedAtRef.current = now;
+              return next;
+            }
+          }
+          lastBotLandedAtRef.current = now;
+          return [...m, { id: uid(), role: "bot", text: incoming }];
+        });
         return;
       }
 
@@ -450,6 +501,15 @@ export function ChatScreen({
         if (!openId) {
           openId = uid();
           streamingIdRef.current = openId;
+          // Tell the scroll hook a stream is in flight — rAF-
+          // coalesced sticky-bottom, tighter at-bottom threshold,
+          // keyboard re-snap suppressed for the duration. Cancel
+          // any pending "settle" timer from a prior stream.
+          if (streamEndTimerRef.current) {
+            clearTimeout(streamEndTimerRef.current);
+            streamEndTimerRef.current = null;
+          }
+          setStreamActive(true);
           setMessages((m) => [
             ...m,
             { id: openId!, role: "bot", text: "", streaming: true },
@@ -475,6 +535,16 @@ export function ChatScreen({
             ),
           );
           streamingIdRef.current = null;
+          // Update the bot-landed timestamp so a follow-up `text`
+          // event with payload.coalesce=true can merge into this
+          // just-settled streamed message.
+          lastBotLandedAtRef.current = Date.now();
+          // Debounce setStreamActive(false) — the brain often emits
+          // a quick_replies / text right after complete (chip ack,
+          // follow-up bubble). Keeping streaming-mode active through
+          // that tail keeps the rAF-coalesced scroll in charge so
+          // the chip attach doesn't double-animate.
+          armStreamSettle();
         } else if (full) {
           // No tokens streamed — treat complete as a single message.
           setMessages((m) => [

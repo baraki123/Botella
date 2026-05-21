@@ -146,6 +146,17 @@ export interface ChatScrollControls<T extends MinimalMessage> {
    * area, so adding `insets.bottom` on top of it just creates dead space
    * above the keyboard. Always-false on web. */
   isKeyboardVisible: boolean;
+  /** ChatScreen flips this true on the first `token` event of a stream
+   * and false ~300ms after the stream ends. The hook uses it to:
+   *   1. Tighten the AT_BOTTOM_PX threshold so a 30px finger-nudge
+   *      releases sticky-bottom (Claude-style "let me read").
+   *   2. Switch sticky-bottom from `scrollToEnd({animated:true})` per
+   *      tick to a rAF-coalesced `scrollToOffset({animated:false})` —
+   *      no stacked iOS scroll animations during fast token bursts.
+   *   3. Suppress the Keyboard.didShow re-snap (the per-frame scroll
+   *      already keeps us at bottom; the Keyboard event would just
+   *      double-animate). */
+  setStreamActive: (active: boolean) => void;
 }
 
 const PILL_FADE_MS = 180;
@@ -153,7 +164,12 @@ const PILL_FADE_MS = 180;
 // bottom of the conversation" for sticky-follow purposes. Small enough
 // to tolerate scroll inertia; large enough that one-pixel float math
 // doesn't flip-flop the state.
-const AT_BOTTOM_PX = 60;
+const AT_BOTTOM_PX_IDLE = 60;
+// Tighter threshold while a stream is in flight. A 30px scroll-up
+// (one finger nudge) should release sticky-bottom — Claude's reading-
+// pause heuristic. After the stream settles, we revert to AT_BOTTOM_PX_IDLE
+// so normal scrolling tolerates a little inertia overshoot.
+const AT_BOTTOM_PX_STREAMING = 24;
 // Smart-snap Case B anchor offset: when the latest message is taller
 // than the viewport, scroll so its top sits ONE_LINE_PX below the top
 // of the viewport. The one line of prior context is a visual anchor
@@ -238,6 +254,35 @@ export function useChatScroll<T extends MinimalMessage>(
   // happens to be mid-thread.
   const pendingNewBubbleRef = useRef(false);
 
+  // True while a real LLM token stream is in flight, set by ChatScreen
+  // via setStreamActive(). Three behaviors flip while true:
+  //  · sticky-bottom uses rAF-coalesced scrollToOffset(animated:false)
+  //    instead of scrollToEnd(animated:true), so iOS doesn't stack
+  //    animations across token bursts (smoother follow of the cursor).
+  //  · AT_BOTTOM_PX tightens to 24 — a 30px finger nudge releases
+  //    sticky-bottom (lets the user read while Layla keeps writing).
+  //  · Keyboard.didShow / onLayout re-snaps suppressed (the per-frame
+  //    scroll already keeps us pinned to the bottom).
+  const streamActiveRef = useRef(false);
+  // rAF coalescing for sticky-bottom during streaming. We only need
+  // ONE scroll per frame regardless of how many setMessages tokens
+  // landed — onContentSizeChange schedules a frame, the frame reads
+  // the latest content height and scrolls there.
+  const pendingScrollRef = useRef(false);
+  const stickyBottom = useCallback(() => {
+    if (pendingScrollRef.current) return;
+    pendingScrollRef.current = true;
+    requestAnimationFrame(() => {
+      pendingScrollRef.current = false;
+      const list = listRef.current;
+      if (!list) return;
+      const viewportH = listHeightRef.current;
+      const contentH = prevContentHeightRef.current;
+      const offset = Math.max(0, contentH - viewportH);
+      list.scrollToOffset({ offset, animated: false });
+    });
+  }, []);
+
   useLayoutEffect(() => {
     messagesRef.current = messages;
     // Smart-snap bookkeeping: detect single new bubble vs bulk arrival.
@@ -301,7 +346,14 @@ export function useChatScroll<T extends MinimalMessage>(
         0,
         contentSize.height - layoutMeasurement.height - contentOffset.y,
       );
-      const atBottom = distanceFromBottom < AT_BOTTOM_PX;
+      // Tighter threshold while streaming — a small finger nudge
+      // releases sticky-bottom so the user can read at their pace
+      // while Layla keeps writing. Reverts to the lenient 60px once
+      // the stream settles.
+      const threshold = streamActiveRef.current
+        ? AT_BOTTOM_PX_STREAMING
+        : AT_BOTTOM_PX_IDLE;
+      const atBottom = distanceFromBottom < threshold;
       isAtBottomRef.current = atBottom;
       if (atBottom) userOverrideRef.current = false;
       // Pill surfaces ONLY when the user is more than one full viewport
@@ -355,7 +407,19 @@ export function useChatScroll<T extends MinimalMessage>(
       pendingNewBubbleRef.current = false;
       if (!isNewBubble) {
         if (isAtBottomRef.current) {
-          listRef.current?.scrollToEnd({ animated: true });
+          // During streaming, the latest bubble grows every ~16ms as
+          // tokens arrive. Per-tick `scrollToEnd({animated:true})`
+          // stacks iOS scroll animations and the bottom wobbles.
+          // Use rAF-coalesced `scrollToOffset({animated:false})`:
+          // one scroll per frame, no animation, perfectly glued to
+          // the cursor. Outside streaming (chip-row attach, typing
+          // indicator mount), keep the animated scrollToEnd — that
+          // single discrete event reads better animated.
+          if (streamActiveRef.current) {
+            stickyBottom();
+          } else {
+            listRef.current?.scrollToEnd({ animated: true });
+          }
         }
         return;
       }
@@ -426,6 +490,10 @@ export function useChatScroll<T extends MinimalMessage>(
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
       () => {
         setIsKeyboardVisible(true);
+        // Skip the snap during streaming — the per-frame stickyBottom
+        // already keeps us pinned to the cursor, and this would just
+        // double-animate against the keyboard's rise.
+        if (streamActiveRef.current) return;
         if (
           isAtBottomRef.current
           && !userOverrideRef.current
@@ -442,6 +510,7 @@ export function useChatScroll<T extends MinimalMessage>(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
       () => {
         setIsKeyboardVisible(false);
+        if (streamActiveRef.current) return;
         if (isAtBottomRef.current && !userOverrideRef.current) {
           setTimeout(() => snapToLatest(true), 50);
         }
@@ -463,6 +532,21 @@ export function useChatScroll<T extends MinimalMessage>(
     listRef.current?.scrollToEnd({ animated: true });
   }, [setPill]);
 
+  const setStreamActive = useCallback((active: boolean) => {
+    streamActiveRef.current = active;
+    // When a stream ends, do ONE final smooth scroll-to-bottom if the
+    // user was still at the bottom. The rAF-coalesced scrolls during
+    // streaming were `animated: false` (intentional — no wobble); the
+    // closing scroll gets `animated: true` so the bubble settles with
+    // a single soft easing. Skip if the user has scrolled away — they
+    // chose to read above, and the pill is already showing.
+    if (!active) {
+      if (isAtBottomRef.current && !userOverrideRef.current) {
+        listRef.current?.scrollToEnd({ animated: true });
+      }
+    }
+  }, []);
+
   return {
     listRef,
     pillOpacity,
@@ -472,5 +556,6 @@ export function useChatScroll<T extends MinimalMessage>(
     onLayout,
     jumpToLatest,
     isKeyboardVisible,
+    setStreamActive,
   };
 }
