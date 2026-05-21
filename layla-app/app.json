@@ -39,7 +39,16 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "permissions": ["RECORD_AUDIO", "WRITE_EXTERNAL_STORAGE"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "RECORD_AUDIO",
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -55,8 +64,13 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "61dc416b-8110-445f-944e-4fc21f3bfea8"
       }
+    },
+    "owner": "gombicreations",
+    "runtimeVersion": "exposdk:54.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/61dc416b-8110-445f-944e-4fc21f3bfea8"
     }
   }
 }

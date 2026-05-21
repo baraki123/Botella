@@ -220,6 +220,14 @@ export function useChatScroll<T extends MinimalMessage>(
   const prevMessageCountRef = useRef(0);
   const isBulkArrivalRef = useRef(false);
 
+  // Set when this render pass appended a NEW bubble. Read + cleared by
+  // the next onContentSizeChange so it can distinguish bubble-arrival
+  // height changes (always snap, including Case B) from footer-only
+  // height changes (typing indicator mount/unmount + its internal
+  // deep-read mode animations) — those should NEVER yank a reader who
+  // happens to be mid-thread.
+  const pendingNewBubbleRef = useRef(false);
+
   useLayoutEffect(() => {
     messagesRef.current = messages;
     // Smart-snap bookkeeping: detect single new bubble vs bulk arrival.
@@ -231,6 +239,7 @@ export function useChatScroll<T extends MinimalMessage>(
     if (curr === prev + 1) {
       // Single new bubble: its top sits at the previous bottom.
       lastBubbleTopRef.current = prevContentHeightRef.current;
+      pendingNewBubbleRef.current = true;
     } else if (curr !== prev) {
       // Bulk change (session restore, history load, clear): user
       // wants to be at the bottom of the whole loaded thread, not
@@ -318,6 +327,19 @@ export function useChatScroll<T extends MinimalMessage>(
         requestAnimationFrame(() =>
           listRef.current?.scrollToEnd({ animated: false }),
         );
+        return;
+      }
+      // Distinguish bubble-arrival vs footer-only height changes:
+      //   · New bubble this render → snap (Case A/B as usual). The
+      //     reader expects the new content to be in view.
+      //   · Only the footer height changed (typing indicator
+      //     mount/unmount, deep-read mode swap-in, label cycle) →
+      //     ONLY snap if the user is currently at the bottom. A reader
+      //     scrolling through the chart sigil shouldn't be yanked
+      //     back when the typing indicator's progress bar fades in.
+      const isNewBubble = pendingNewBubbleRef.current;
+      pendingNewBubbleRef.current = false;
+      if (!isNewBubble && !isAtBottomRef.current) {
         return;
       }
       snapToLatest(true);

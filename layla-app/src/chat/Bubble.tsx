@@ -962,8 +962,23 @@ const rtlMarkdownStyles = {
   paragraph: _rtl(markdownStyles.paragraph),
   heading1: _rtl(markdownStyles.heading1),
   heading2: _rtl(markdownStyles.heading2),
-  heading3: _rtl(markdownStyles.heading3),
+  // Heading3 (tier labels on the chart bubble) needs an extra nudge —
+  // the textTransform: uppercase + letter-spacing 2 we use for the
+  // manuscript caps treatment was suppressing the writingDirection on
+  // some Hebrew strings. Drop both for RTL renders; Hebrew has no
+  // case + extra letter-spacing breaks bidi grouping for Hebrew chars.
+  heading3: {
+    ..._rtl(markdownStyles.heading3),
+    textTransform: "none" as const,
+    letterSpacing: 0.3,
+  },
   heading4: _rtl(markdownStyles.heading4),
+  // strong + em both ultimately render Hebrew text inside a paragraph;
+  // the paragraph's writingDirection should cascade but RN inheritance
+  // for writingDirection is patchy. Set explicitly so bold "**עקרב**"
+  // doesn't drop back to LTR mid-line.
+  strong: _rtl(markdownStyles.strong),
+  em: _rtl(markdownStyles.em),
   blockquote: {
     ...markdownStyles.blockquote,
     // Mirror the left rule to the right edge for RTL.
@@ -974,7 +989,7 @@ const rtlMarkdownStyles = {
     paddingRight: 12,
   },
   list_item: {
-    ...markdownStyles.list_item,
+    ..._rtl(markdownStyles.list_item),
     flexDirection: "row-reverse" as const,
   },
   bullet_list_icon: {

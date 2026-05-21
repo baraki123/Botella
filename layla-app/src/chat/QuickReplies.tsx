@@ -46,8 +46,24 @@ export function QuickReplies({ options, onPick }: Props) {
   const doorwayCount = partitioned.filter((p) => p.kind === "doorway").length;
   const allDoorway = doorwayCount === options.length && doorwayCount >= 2;
 
+  // Detect Hebrew from any chip label so the chip row aligns from the
+  // right edge in RTL languages (same pattern as the per-bubble RTL
+  // detection in Bubble.tsx). Per-row, not per-chip — flex layouts
+  // need a single direction for the whole flex container.
+  const rowIsRTL = options.some((opt) => {
+    const label =
+      typeof opt === "string" ? opt : (opt as any).label || "";
+    return /[֐-׿]/.test(label);
+  });
+
   return (
-    <View style={[styles.row, allDoorway && styles.rowGrid]}>
+    <View
+      style={[
+        styles.row,
+        allDoorway && styles.rowGrid,
+        rowIsRTL && styles.rowRTL,
+      ]}
+    >
       {partitioned.map((p, i) => {
         if (p.kind === "doorway") {
           const label = stripLeadingEmoji(
@@ -263,6 +279,15 @@ const styles = StyleSheet.create({
   rowGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+  },
+  // RTL chip row — chips wrap from the right edge so the lean-forward
+  // (primary) chip lands where the user's eye naturally lands in
+  // Hebrew. Also flips the padding so the chips don't slam into the
+  // gold dot's column on the right.
+  rowRTL: {
+    flexDirection: "row-reverse",
+    paddingLeft: theme.spacing + 6,
+    paddingRight: theme.spacing + 6 + 17,
   },
   gridCell: {
     width: "50%",

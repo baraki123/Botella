@@ -9,7 +9,8 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
@@ -18,7 +19,8 @@
       },
       "env": {
         "EXPO_PUBLIC_BOTELLA_ENV": "preview"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
@@ -28,9 +30,7 @@
       "env": {
         "EXPO_PUBLIC_BOTELLA_ENV": "production"
       },
-      "extra": {
-        "botellaEnv": "production"
-      }
+      "channel": "production"
     }
   },
   "submit": {

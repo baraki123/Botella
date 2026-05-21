@@ -381,10 +381,10 @@ const styles = StyleSheet.create({
   input: {
     paddingVertical: 11,
     paddingHorizontal: 16,
-    fontSize: 16,
+    fontSize: 17,
     color: theme.text,
     maxHeight: 140,
-    lineHeight: 22,
+    lineHeight: 24,
     // RN-Web injects a browser focus ring on the underlying <textarea>;
     // suppress so our amber inputWrapFocused border is the only focus cue.
     ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : {}),
