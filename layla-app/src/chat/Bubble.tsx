@@ -972,7 +972,15 @@ const _rtl = <T extends object>(s: T): T => ({
 const rtlMarkdownStyles = {
   ...markdownStyles,
   body: _rtl(markdownStyles.body),
-  paragraph: _rtl(markdownStyles.paragraph),
+  // Hebrew lines run longer (no caps, denser word forms) and a 12px
+  // gap between paragraphs reads as no gap at all — paragraphs blur
+  // into one wall of text. Bump to 18px so distinct thoughts breathe
+  // visibly in RTL renders. Also tightens the marginTop for the first
+  // paragraph so the bubble doesn't have a phantom leading gap.
+  paragraph: {
+    ..._rtl(markdownStyles.paragraph),
+    marginBottom: 18,
+  },
   heading1: _rtl(markdownStyles.heading1),
   heading2: _rtl(markdownStyles.heading2),
   // Heading3 (tier labels on the chart bubble) needs an extra nudge —
