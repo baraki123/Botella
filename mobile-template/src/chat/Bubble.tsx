@@ -600,6 +600,22 @@ function useTypewriter(
   );
   const skipRef = useRef(false);
 
+  // When the bubble is NOT typewritering (already-revealed, streaming,
+  // or short), mirror `revealed` to the live `text`. Without this,
+  // a streaming bubble's `revealed` would freeze at the first chunk
+  // captured by useState's initializer — and once message.streaming
+  // flips to false, the render switches from the streaming branch
+  // (uses live `text`) to the typewriter branch (uses stale `revealed`),
+  // making the bubble visibly "shrink" back to the first chunk + caret
+  // until the user taps to skip. We only run this sync when the
+  // typewriter is OFF — during a real reveal, the typewriter owns
+  // `revealed` and we don't fight it.
+  useEffect(() => {
+    if (!shouldRevealRef.current) {
+      setRevealed(text);
+    }
+  }, [text]);
+
   useEffect(() => {
     if (!shouldReveal) {
       setRevealed(text);
