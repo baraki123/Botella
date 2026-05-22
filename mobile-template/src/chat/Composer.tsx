@@ -381,16 +381,25 @@ const styles = StyleSheet.create({
   input: {
     paddingVertical: 11,
     paddingHorizontal: 16,
-    fontSize: 16,
+    fontSize: 17,
     color: theme.text,
     maxHeight: 140,
-    lineHeight: 22,
+    lineHeight: 24,
     // RN-Web injects a browser focus ring on the underlying <textarea>;
     // suppress so our amber inputWrapFocused border is the only focus cue.
     ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : {}),
   },
   inputRTL: {
-    textAlign: "right",
+    // textAlign: "auto" lets iOS pick direction per-character based on
+    // the first strongly-directional code-point typed. RTL Hebrew text
+    // aligns right; LTR English text aligns left — even when the
+    // session lang is Hebrew. Hardcoding "right" leaked Hebrew-session
+    // alignment onto English-typed words (e.g. names, English brand
+    // names mid-Hebrew sentence) which read backwards.
+    textAlign: "auto",
+    // writingDirection still RTL so the cursor placement on an empty
+    // input follows the session's primary direction. Per-character
+    // alignment overrides this once the user types anything.
     writingDirection: "rtl",
   },
   sendShell: {
