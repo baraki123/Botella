@@ -275,6 +275,40 @@ export function ChatScreen({
     return null;
   }, [messages]);
 
+  // RULE: when a new chip-bearing question arrives, the bubble carrying
+  // the question MUST be visible. Smart-snap is gated on
+  // `isAtBottomRef`, so if the user happened to drift off-bottom in the
+  // moments before the question landed (geocode pause, brief touch,
+  // keyboard rise), the chip row would surface in the sticky tray
+  // while the question text sits above the viewport — chips covering
+  // the prompt they answer. Override at-bottom: when a fresh chip
+  // message with prompt text appears, force a jumpToLatest so the
+  // question is visible just above the chip row.
+  //
+  // Excludes the paginated_read Continue chip — that single-option
+  // "__paginated_advance" case is owned by smart-snap (long section
+  // bubbles use Case B; calling jumpToLatest here would overshoot the
+  // top of the new section).
+  const prevChipMessageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = latestChipMessage?.id ?? null;
+    const prev = prevChipMessageIdRef.current;
+    prevChipMessageIdRef.current = id;
+    if (!id || id === prev) return;
+    if (!latestChipMessage?.text) return;
+    const isPaginatedContinue = (latestChipMessage.quickReplies || []).some(
+      (opt) => {
+        const v = typeof opt === "string" ? opt : (opt as { value?: string }).value;
+        return v === "__paginated_advance";
+      },
+    );
+    if (isPaginatedContinue) return;
+    // Defer a frame so the FlatList finishes laying out the new bubble +
+    // the sticky chip row before we scroll; otherwise scrollToEnd targets
+    // a viewport that's still the old (taller) size.
+    requestAnimationFrame(() => jumpToLatest());
+  }, [latestChipMessage, jumpToLatest]);
+
   // Detect the active language from message content so RTL-aware UI
   // (composer placeholder, bubble dot side) can respond. Sniff only
   // USER messages — bot messages can contain Hebrew incidentally (the
