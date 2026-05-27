@@ -185,7 +185,61 @@ export function ChatScreen({
   // Do NOT add ad-hoc scroll calls in this file — extend the hook in
   // mobile-template/ and copy.
   const scroll = useChatScroll<Message>(messages);
-  const { listRef, pillOpacity, jumpToLatest, setStreamActive } = scroll;
+  const { listRef, pillOpacity, jumpToLatest, setStreamActive, isAtBottomRef } = scroll;
+  // ID of the FIRST bot bubble that arrived while the user was scrolled
+  // away. The Bubble for this ID renders the NewBeatMark in its gutter
+  // — a gold rule tracing upward + a dot bloom, telling the user "the
+  // new beat starts here." Cleared when the user returns to the bottom.
+  // Only ever assigned once per "I scrolled away" episode (subsequent
+  // bubbles in the same episode don't get re-marked; the first one is
+  // the bookmark).
+  const [firstNewBeatId, setFirstNewBeatId] = useState<string | null>(null);
+  const firstNewBeatIdRef = useRef<string | null>(null);
+  // Last-known length seen WHILE the user was at-bottom. The next bot
+  // bubble at index >= this counts as "new since you were here" and
+  // gets marked. Updated on every scroll event where isAtBottomRef
+  // resolves true.
+  const lastSeenLenRef = useRef<number>(messages.length);
+  const onScrollWithNewBeat = useCallback(
+    (e: any) => {
+      scroll.onScroll(e);
+      if (isAtBottomRef.current) {
+        lastSeenLenRef.current = messages.length;
+        if (firstNewBeatIdRef.current !== null) {
+          firstNewBeatIdRef.current = null;
+          setFirstNewBeatId(null);
+        }
+      }
+    },
+    [scroll, isAtBottomRef, messages.length],
+  );
+  // Detect: a new bot bubble landed while the user is scrolled away.
+  // Mark the FIRST one as the new-beat anchor. Re-running the effect
+  // on every message append is cheap (Bubble keys by message.id; only
+  // the marked bubble re-renders with new isNewBeat=true).
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      lastSeenLenRef.current = messages.length;
+      if (firstNewBeatIdRef.current !== null) {
+        firstNewBeatIdRef.current = null;
+        setFirstNewBeatId(null);
+      }
+      return;
+    }
+    if (firstNewBeatIdRef.current !== null) return;
+    // First message past lastSeenLenRef that the user didn't author.
+    // Skip streaming bubbles: they're still being written; the mark
+    // should land once the bubble is settled (the effect fires again
+    // when `streaming` flips false on the same id).
+    for (let i = lastSeenLenRef.current; i < messages.length; i++) {
+      const m = messages[i];
+      if (m && m.role === "bot" && !m.streaming) {
+        firstNewBeatIdRef.current = m.id;
+        setFirstNewBeatId(m.id);
+        break;
+      }
+    }
+  }, [messages, isAtBottomRef]);
   // Debounce flipping setStreamActive(false) — when the brain emits
   // `complete` then immediately starts a chip/quick_replies/text in
   // the same handler tick, we want the scroll hook to stay in
@@ -881,6 +935,7 @@ export function ChatScreen({
                 onImagePress={setLightboxUri}
                 lang={lang}
                 onLongPressShare={handleShareAsCard}
+                isNewBeat={item.id === firstNewBeatId}
               />
             )}
             ListFooterComponent={showTyping ? <TypingIndicator /> : null}
@@ -891,7 +946,7 @@ export function ChatScreen({
             // falls back to no-op so we add it as a non-iOS hint too.
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             onLayout={scroll.onLayout}
-            onScroll={scroll.onScroll}
+            onScroll={onScrollWithNewBeat}
             onScrollBeginDrag={scroll.onScrollBeginDrag}
             onContentSizeChange={scroll.onContentSizeChange}
             // scrollToIndex on a tall message can fail if the index is

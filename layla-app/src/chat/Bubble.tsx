@@ -7,6 +7,7 @@ import Svg, { Path } from "react-native-svg";
 
 import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
+import { NewBeatMark } from "./NewBeatMark";
 import {
   bubbleCacheKey,
   getCurrentJwt,
@@ -67,6 +68,12 @@ interface Props {
    * host (ChatScreen) opens the share-as-card preview. Streaming
    * bubbles never call this — the text is still growing. */
   onLongPressShare?: (text: string) => void;
+  /** When true, render the gutter "new beat" mark next to the gold dot
+   * (a hair-thin gold rule + dot bloom). Used by ChatScreen to point
+   * the user at the FIRST bubble that landed while they were scrolled
+   * away. ChatScreen owns the lifecycle — clears when the user returns
+   * to the bottom. */
+  isNewBeat?: boolean;
 }
 
 /**
@@ -81,7 +88,13 @@ interface Props {
  * gold dot blooms in slightly after Layla's text starts settling — small
  * timing detail that makes her presence feel composed rather than abrupt.
  */
-export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }: Props) {
+export function Bubble({
+  message,
+  onImagePress,
+  lang = "en",
+  onLongPressShare,
+  isNewBeat = false,
+}: Props) {
   const isUser = message.role === "user";
   // Memoize per-bubble so streaming-token re-renders + chat-state
   // updates don't re-walk the regex chain on every paint of every row.
@@ -303,9 +316,12 @@ export function Bubble({ message, onImagePress, lang = "en", onLongPressShare }:
         }
         style={[styles.botRow, isRTL && styles.botRowRTL]}
       >
-        <Animated.View
-          style={[styles.botDot, { transform: [{ scale: dotScale }] }]}
-        />
+        <View style={styles.botDotSlot}>
+          <NewBeatMark visible={isNewBeat} rtl={isRTL} />
+          <Animated.View
+            style={[styles.botDot, { transform: [{ scale: dotScale }] }]}
+          />
+        </View>
         <View style={styles.botContent}>
           {message.imageUrl ? (
             <Pressable
@@ -712,6 +728,12 @@ const styles = StyleSheet.create({
     flexDirection: "row-reverse",
     paddingRight: 0,
     paddingLeft: 28,
+  },
+  // Zero-width container that holds the gold dot AND, when present,
+  // the NewBeatMark tracing upward into the gutter above it.
+  botDotSlot: {
+    width: 6,
+    position: "relative",
   },
   botDot: {
     width: 6,

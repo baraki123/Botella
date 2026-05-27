@@ -157,6 +157,11 @@ export interface ChatScrollControls<T extends MinimalMessage> {
    *      already keeps us at bottom; the Keyboard event would just
    *      double-animate). */
   setStreamActive: (active: boolean) => void;
+  /** READ-ONLY ref to the current at-bottom state. ChatScreen uses this
+   * to mark the FIRST bubble that landed while the user was scrolled
+   * away (the "new beat" indicator in the gutter). Do NOT write to this;
+   * the hook owns at-bottom truth. */
+  isAtBottomRef: React.RefObject<boolean>;
 }
 
 const PILL_FADE_MS = 180;
@@ -557,5 +562,6 @@ export function useChatScroll<T extends MinimalMessage>(
     jumpToLatest,
     isKeyboardVisible,
     setStreamActive,
+    isAtBottomRef,
   };
 }
