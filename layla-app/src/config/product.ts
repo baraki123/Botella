@@ -30,15 +30,14 @@ const isProd =
   (Constants.expoConfig?.extra as any)?.botellaEnv === "production";
 
 // Resolve the backend URL with this priority:
-//   1. EXPO_PUBLIC_API_URL — manual override (works in Expo Go too).
+//   1. EXPO_PUBLIC_API_URL — manual override (works in Expo Go too, but
+//      only reliable when Metro sees it at bundle time).
 //   2. EAS production profile — Northflank URL.
-//   3. iOS / Android native dev → also the Northflank URL. Plain HTTP to a
-//      LAN dev backend would fail iOS App Transport Security ("Network
-//      request failed" on every fetch), so native dev defaults to prod.
-//      To run native against a LOCAL backend, set EXPO_PUBLIC_API_URL or
-//      `npx expo start --tunnel`.
-//   4. Web dev → window.location.hostname:8000, the standard backend-dev
-//      loop on a laptop.
+//   3. iOS / Android native dev → Northflank URL (ATS would block plain
+//      HTTP to a LAN dev backend anyway).
+//   4. Deployed web (Vercel preview/prod, custom domains) → Northflank.
+//   5. localhost web dev → window.location.hostname:8000 — the
+//      standard backend-dev loop on a laptop.
 function resolveApiUrl(): string {
   const override = (process.env as any).EXPO_PUBLIC_API_URL;
   if (typeof override === "string" && override.length > 0) return override;
@@ -46,6 +45,9 @@ function resolveApiUrl(): string {
   if (Platform.OS !== "web") return PRODUCTION_API_URL;
   const host =
     typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
+  const isLocal =
+    host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
+  if (!isLocal) return PRODUCTION_API_URL;
   return `http://${host}:8000`;
 }
 
