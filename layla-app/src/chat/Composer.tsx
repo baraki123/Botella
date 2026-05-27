@@ -158,6 +158,10 @@ export function Composer({
             editable={!recording && !transcribing}
             blurOnSubmit={false}
             multiline
+            // Start collapsed to one visible line. On RN-Web this maps to
+            // <textarea rows={1}>, keeping the idle composer compact; the
+            // textarea still grows as the user types (capped by maxHeight).
+            numberOfLines={1}
             // Spell-check ON (red squiggle on misspelled names),
             // autocorrect OFF (no auto-replacement). On iOS, that combo
             // would normally leave an EMPTY QuickType suggestion bar
@@ -379,12 +383,12 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   input: {
-    paddingVertical: 11,
+    paddingVertical: 8,
     paddingHorizontal: 16,
     fontSize: 17,
     color: theme.text,
     maxHeight: 140,
-    lineHeight: 24,
+    lineHeight: 22,
     // RN-Web injects a browser focus ring on the underlying <textarea>;
     // suppress so our amber inputWrapFocused border is the only focus cue.
     ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : {}),

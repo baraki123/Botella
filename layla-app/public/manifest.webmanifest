@@ -1,0 +1,18 @@
+{
+  "name": "Layla",
+  "short_name": "Layla",
+  "description": "An astrologically-informed AI advisor — Layla looks at your chart, then listens.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E0B16",
+  "theme_color": "#0E0B16",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}
