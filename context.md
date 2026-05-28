@@ -100,6 +100,13 @@ iPhone 16 Plus (UDID `8BDE87D3-2C7E-4927-A02D-4ED9C48B7110`) is booted with Expo
 
 ### Standing state (rest of §0 unchanged below)
 
+**Lifecycle benchmark — load-bearing.** Before shipping any change that
+touches flows, free_chat, the scheduler, push, or the storage shape,
+run the affected journeys in `~/Desktop/Coding/GombiStar/mcp/lifecycle_journeys.md`.
+A journey dropping to ≤2 on any axis is a hard block. Felt-quality
+regressions block shipping the same way test failures do. Full tenet
+and how-to in §10 below. Companion to the per-turn rubric at
+`mcp/user_pov_test_plan.md`.
 
 **The chat-first redesign (Map / Moment / Orbit) is LIVE in production.**
 Telegram (`@laylastarbot`) and the iOS/web app both speak to the same
@@ -1911,6 +1918,86 @@ haven't entered any tracks. Keep both layers in `flows/checkin.py`:
    tracks + 1 question chip + escape.
 2. If user has zero tracks: show 3 random questions (current behavior)
    + escape.
+
+---
+
+## 10. Lifecycle benchmark — the felt-quality contract across time
+
+`user_pov_test_plan.md` measures whether a single reply reads right.
+That's necessary but not enough. Layla's product promise also lives
+*across time*: did she remember the anchor from a week ago, did she
+notice the orbit member's Jupiter return, did she avoid repeating last
+Tuesday's advice verbatim. The per-turn rubric can't see those.
+
+The **lifecycle benchmark** at `~/Desktop/Coding/GombiStar/mcp/lifecycle_journeys.md`
+is the felt-quality contract for the lifecycle. 10 scenarios spanning
+Day 0 onboarding → next-day return → Week 2+ continuity, scored on five
+axes (Continuity / Memory / Noticing / Anti-Repetition / Value-Add),
+total /25. Read that doc for the full catalog, pass signals, and
+anti-patterns. This section captures the tenet, the ship gate, and
+where verdicts live.
+
+### Tenet
+
+> **We develop against benchmark user journeys.** Before shipping any
+> change that touches flows, free_chat, the scheduler, push, or the
+> storage shape, run the affected journeys in `lifecycle_journeys.md`.
+> A journey dropping to ≤2 on any axis is a hard block. Add new
+> journeys when shipping new value paths. Felt-quality regressions
+> block shipping the same way test failures do. The benchmark is also
+> where forward work lives — `BLOCKED` stories are roadmap items, not
+> technical debt.
+
+### How verdicts persist
+
+- `mcp/lifecycle_journeys.md` is the source of truth (in git).
+- `mcp/journey_results/LATEST.md` is the most-recent canonical sweep
+  (in git). Per-run timestamped logs are gitignored.
+- Each commit touching `flows/`, `services/laila_chat.py`,
+  `services/laila_state.py`, `services/daily_runner.py`,
+  `botella_manifest.py`, or `botella/` storage shape MUST end with a
+  `Journey verdict:` line, e.g.:
+
+  ```
+  Journey verdict: J6 5/4/5/4/5 = 23/25 (was 22/25); J7 unchanged
+  ```
+- Screenshots: `botella/screenshots/journey-NN-{slug}.png`, matching
+  the existing `userpov-NN-{slug}.png` pattern.
+
+### How to run
+
+```bash
+cd ~/Desktop/Coding/GombiStar && source venv/bin/activate
+python mcp/journey_NN_<slug>.py    # single journey
+python mcp/run_journeys.py         # full sweep → journey_results/LATEST.md
+```
+
+Each harness mints a fresh anonymous JWT, walks WS via `transport=ios`,
+time-warps `record.last_*_at` for Day-N journeys (no real waiting), and
+ends by calling the LLM-as-judge in `mcp/judge.py` for per-axis scores.
+LLM output is non-deterministic — re-run borderline runs twice and
+spot-check any axis ≤3 before treating it as authoritative.
+
+### The 10 (+2) journeys at a glance
+
+| # | Title | Day | Status |
+|---|---|---|---|
+| J1 | First map + post-map pivot | D0 | LIVE |
+| J2 | Get-to-know → doorway closing | D0 | LIVE |
+| J3 | Doorway "something on my mind" → decision | D0 | LIVE |
+| J4 | Day-1 returning checkin | D+1 | LIVE |
+| J5 | "Show me my map" recall | D+1 | LIVE |
+| J6 | Orbit add (in-chat) | D+2 | LIVE |
+| J7 | Synastry focus-person | D+5 | LIVE |
+| J8 | Anchor-question continuity | D+7 | 🔴 BLOCKED (race) |
+| J9 | Transit alert push (own chart) | D+7 | LIVE |
+| J10 | Orbit-member transit watch | D+14 | 🔴 BLOCKED (not built) |
+| J11 | Cross-day anti-repetition | D+14 | 🔴 BLOCKED (secondary) |
+| J12 | Memory note recall (Hank) | D+10 | LIVE (secondary) |
+
+`BLOCKED` rows are forward stories — they run as expected-fail today,
+and flip to PASS when the underlying code lands. They are the roadmap
+the benchmark drives.
 
 ---
 

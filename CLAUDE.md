@@ -156,6 +156,17 @@ Any change to `personality/layla_system_prompt.md`, the per-call directives in `
 
 Append the verdict (which scenarios passed/failed/regressed) to the commit message so the rubric history travels with the code. Save the relevant screenshots under `botella/screenshots/userpov-{NN}-{slug}.png` so the moment is reviewable later.
 
+### Ship gate for lifecycle changes
+
+The per-turn rubric above measures whether one reply reads right. The **lifecycle benchmark** at `~/Desktop/Coding/GombiStar/mcp/lifecycle_journeys.md` measures whether Layla adds value *across time* — onboarding → next-day return → Week 2+. Any change to `flows/`, `services/laila_chat.py`, `services/laila_state.py`, `services/daily_runner.py`, `botella_manifest.py`, or `botella/` storage shape must be verified against the affected lifecycle journeys before shipping:
+
+- Re-run any journey the change *intends* to fix — must move from FAIL to PASS (or `BLOCKED` → LIVE for forward stories).
+- Spot-check at least 1–2 unrelated passing journeys to confirm no regression. The five axes (Continuity / Memory / Noticing / Anti-Repetition / Value-Add) catch different failure modes than the per-turn rubric.
+- A journey dropping to ≤2 on any axis is a ship-blocker.
+- LLM-as-judge output is non-deterministic — rerun any borderline run twice; human spot-check any axis ≤3.
+
+Append a `Journey verdict:` line to commit messages, e.g. `Journey verdict: J6 5/4/5/4/5 = 23/25 (was 22/25); J7 unchanged`. Save screenshots under `botella/screenshots/journey-{NN}-{slug}.png`. Full tenet + how-to in `botella/context.md` §10.
+
 ## When you ship code
 
 Backend changes auto-deploy via Northflank on push to GombiStar's `main`. Build provenance is stamped automatically by `.github/workflows/stamp-build.yml` (in the GombiStar repo) — that workflow polls until the new image is deployed, then merges `LAYLA_BUILD_VERSION/_NOTE/_TIME` into Northflank's runtime-environment via the API. No manual ritual. See `context.md` §6 for the (one-time) `gh secret set NORTHFLANK_TOKEN` setup that bootstraps the workflow.
