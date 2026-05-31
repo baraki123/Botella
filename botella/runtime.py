@@ -38,6 +38,15 @@ async def run(
     storage = manifest.storage
     session = await storage.load_session(msg.user_id)
 
+    # Normalize leading bidi/format controls + whitespace once at the
+    # boundary so every flow state, every trigger, every free_chat hook
+    # sees clean text. iOS Hebrew (and some Android RTL) keyboards inject
+    # U+200E LRM before user-typed text — without this, a state matcher
+    # like `txt in ("english", "en")` silently misses on `"‎english"`
+    # and the user perceives the flow as stalled.
+    if msg.text is not None:
+        msg.text = _strip_invisible_prefix(msg.text)
+
     # Voice → text preprocessing
     if msg.voice_audio is not None and manifest.voice_handler is not None:
         msg = await manifest.voice_handler(msg, session, storage)
@@ -115,13 +124,13 @@ def _strip_invisible_prefix(text: str) -> str:
 
 
 def _match_trigger(msg: InboundMessage, manifest: BotManifest):
-    if msg.text:
-        stripped = _strip_invisible_prefix(msg.text)
-        if stripped.startswith("/"):
-            cmd = stripped.split(maxsplit=1)[0]
-            fn = manifest.triggers.get(cmd)
-            if fn is not None:
-                return fn
+    # run() already stripped leading bidi/format controls + whitespace, so a
+    # plain startswith check is sufficient here.
+    if msg.text and msg.text.startswith("/"):
+        cmd = msg.text.split(maxsplit=1)[0]
+        fn = manifest.triggers.get(cmd)
+        if fn is not None:
+            return fn
     if msg.callback_data:
         fn = manifest.triggers.get(f"callback:{msg.callback_data}")
         if fn is not None:
