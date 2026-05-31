@@ -468,9 +468,15 @@ export function ChatScreen({
   // callback-trigger matcher runs as if a chip was tapped. Used by the
   // retired-slash-command replacements (__redo_map, __reread_map,
   // __add_person, __link_telegram).
+  //
+  // __redo_map = "Re-do my map" — same effect as typing /newchart, so
+  // wipe the on-device chat tail first (parity with the text path).
   useEffect(() => {
     if (!pendingCallback) return;
     if (status !== "open") return;
+    if (pendingCallback === "__redo_map") {
+      clearChatForReset();
+    }
     streamRef.current?.send({ callback_data: pendingCallback });
     onPendingConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -738,6 +744,28 @@ export function ChatScreen({
     }
   }
 
+  // Wipe the on-device chat tail + paginated buffer so a debug /newchart
+  // or a Settings "Re-do my map" tap looks like a clean restart. The brain
+  // already nulls all the user-record fields (chart, name, lang, etc.) and
+  // re-enters onboarding, but without this the prior conversation lingers
+  // above the new "Pick language" prompt and the user reads it as "nothing
+  // happened." Pre-chat-persistence (before commit a473fca, 2026-05-12)
+  // the UI looked clean by accident.
+  function clearChatForReset() {
+    setMessages([]);
+    paginatedReadRef.current = null;
+    if (session?.userId) {
+      AsyncStorage.removeItem(CHAT_KEY_FOR(session.userId)).catch(() => {});
+      persistPaginatedBuffer(session.userId, null);
+    }
+  }
+
+  // Match `/newchart` and `/reset` even with leading whitespace or a
+  // bidi/format prefix injected by an IME — same defense the brain runs
+  // via runtime._strip_invisible_prefix, mirrored here so the client-side
+  // reset fires whenever the brain-side reset will.
+  const RESET_COMMAND_RE = /^[\s​-‏‪-‮⁦-⁩﻿]*\/(newchart|reset)\b/i;
+
   function send(
     text: string,
     opts?: { voice?: boolean; callback_data?: string },
@@ -748,6 +776,9 @@ export function ChatScreen({
     // Sending also implies "I want to be at the latest" — `jumpToLatest`
     // clears any earlier scroll override so onContentSizeChange resumes
     // sticky-bottom-following.
+    if (RESET_COMMAND_RE.test(text)) {
+      clearChatForReset();
+    }
     jumpToLatest();
     setMessages((m) => [...m, { id: uid(), role: "user", text }]);
     streamRef.current?.send({
