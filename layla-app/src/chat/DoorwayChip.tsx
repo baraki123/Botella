@@ -148,7 +148,7 @@ export function DoorwayChip({
             </Coin>
             <Text
               style={[styles.label, primary && styles.labelPrimary]}
-              numberOfLines={1}
+              numberOfLines={2}
             >
               {label}
             </Text>
@@ -226,7 +226,7 @@ function Coin({
 // at the end of a long read; the coin medallion does the energy work,
 // not the chip bulk. (Earlier 56pt + 18.5px felt huge on the screen.)
 const COIN = 30;
-const CHIP_H = 46;
+const CHIP_MIN_H = 46;
 
 const styles = StyleSheet.create({
   outer: {
@@ -239,9 +239,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 9,
-    height: CHIP_H,
+    // minHeight (not fixed height) — long labels in the 2 × 2 grid
+    // (e.g. "Just let me sit with this", "Go deeper on the map") wrap
+    // onto two lines without truncating. Single-line chips still
+    // render at the 46pt rhythm thanks to the floor.
+    minHeight: CHIP_MIN_H,
     paddingLeft: 8,
     paddingRight: 16,
+    paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: theme.doorChipFillBot,
     borderWidth: StyleSheet.hairlineWidth,
@@ -310,6 +315,12 @@ const styles = StyleSheet.create({
     fontSize: 15.5,
     fontWeight: "600" as const,
     letterSpacing: 0.1,
+    lineHeight: 19,
+    // Label can wrap to two lines (chips are minHeight, not fixed) so
+    // long doorway labels like "Just let me sit with this" render in
+    // full. flexShrink lets the text container compete with the coin
+    // for horizontal space without overflowing the chip.
+    flexShrink: 1,
     // Cochin sits slightly low on the baseline — nudge up so it
     // optically centers with the coin.
     paddingBottom: Platform.OS === "ios" ? 1 : 0,

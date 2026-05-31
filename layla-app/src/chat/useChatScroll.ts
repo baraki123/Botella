@@ -91,6 +91,24 @@
  * ║      Keyboard.dismiss() when the user has gone quiet. Constant   ║
  * ║      exported here so it stays in one place across forks.        ║
  * ║                                                                  ║
+ * ║   ── Chip-tray invariant ──────────────────────────────────      ║
+ * ║                                                                  ║
+ * ║   9. The prompt that owns the current sticky chip row is         ║
+ * ║      ALWAYS visible above the chip row at idle. When the chip    ║
+ * ║      row mounts, swaps, or unmounts, the FlatList's last bubble  ║
+ * ║      (which carries the prompt — possibly empty-prompt chips     ║
+ * ║      attached to the previous bot bubble) MUST land above the    ║
+ * ║      chip row, never behind it. ChatScreen calls                 ║
+ * ║      `armSnapAfterChrome()` whenever `latestChipMessage.id`      ║
+ * ║      changes; that one-shot flag tells the next `onLayout`       ║
+ * ║      event to fire smart-snap REGARDLESS of `isAtBottomRef`.     ║
+ * ║      This closes the race where the user drifted off-bottom      ║
+ * ║      (keyboard rise, brief touch) right before the chip event    ║
+ * ║      arrived. Without this, smart-snap would skip and leave      ║
+ * ║      the prompt covered. The invariant is enforced; rule 1's     ║
+ * ║      "never yank a reader" yields here because the chip tray's   ║
+ * ║      affordance is meaningless without its prompt visible.       ║
+ * ║                                                                  ║
  * ║   ── Discipline ───────────────────────────────────────────      ║
  * ║                                                                  ║
  * ║   This file is canonical. ChatScreen / Bubble / Composer must    ║
@@ -125,6 +143,15 @@ interface MinimalMessage {
 }
 
 export interface ChatScrollControls<T extends MinimalMessage> {
+  /** Call ONCE right before a sticky element above the Composer mounts,
+   * swaps, or unmounts — i.e. the chrome around the FlatList is about
+   * to change. Arms the next `onLayout` event to fire smart-snap
+   * regardless of `isAtBottomRef`. Use this when a chip tray swap
+   * happens while the user is mid-read above bottom: the contract owes
+   * "the bubble the chip row answers must be visible," even if the
+   * user wasn't following the tail at the moment the chip landed.
+   * One-shot — clears after firing. */
+  armSnapAfterChrome: () => void;
   /** Pass to <FlatList ref={listRef} … />. */
   listRef: React.RefObject<FlatList<T> | null>;
   /** Pass to <Animated.View style={{ opacity: pillOpacity }}>…</Animated.View>
@@ -208,14 +235,20 @@ export const KEYBOARD_VERTICAL_OFFSET_IOS = 50;
 
 /**
  * Time the soft keyboard stays open without user input before
- * Composer auto-dismisses it. 3 seconds: long enough that a user
- * pausing to think doesn't lose their keyboard, short enough that
- * a tap-on-input-but-walked-away state self-cleans.
+ * Composer auto-dismisses it. 7 seconds: long enough that a user
+ * pausing to think (re-reading a long prompt, looking up a birth
+ * detail on another tab) doesn't lose their keyboard, short enough
+ * that a tap-on-input-but-walked-away state self-cleans before the
+ * next bot bubble lands and competes with the raised input.
+ *
+ * Was 3000ms — bumped 2026-05-31 after the user reported the
+ * dismiss firing while they were still composing a thought during
+ * the get_to_know reflection questions.
  *
  * Single source of truth for every product fork — Composer reads
  * from here, not a local constant.
  */
-export const IDLE_KEYBOARD_DISMISS_MS = 3000;
+export const IDLE_KEYBOARD_DISMISS_MS = 7000;
 
 export function useChatScroll<T extends MinimalMessage>(
   messages: T[],
@@ -258,6 +291,15 @@ export function useChatScroll<T extends MinimalMessage>(
   // deep-read mode animations) — those should NEVER yank a reader who
   // happens to be mid-thread.
   const pendingNewBubbleRef = useRef(false);
+
+  // Set by ChatScreen via `armSnapAfterChrome()` when the sticky chip
+  // tray is about to mount/swap/unmount. Tells the next onLayout shrink
+  // OR grow to fire smart-snap regardless of `isAtBottomRef` — see rule
+  // 9. Cleared after firing.
+  const snapAfterChromeRef = useRef(false);
+  const armSnapAfterChrome = useCallback(() => {
+    snapAfterChromeRef.current = true;
+  }, []);
 
   // True while a real LLM token stream is in flight, set by ChatScreen
   // via setStreamActive(). Three behaviors flip while true:
@@ -451,26 +493,42 @@ export function useChatScroll<T extends MinimalMessage>(
       const newHeight = e.nativeEvent.layout.height;
       const prevHeight = listHeightRef.current;
       listHeightRef.current = newHeight;
-      // When the FlatList's visible height shrinks (keyboard rising,
-      // sticky-chip row appearing) and the user was at-bottom, re-run
-      // smart-snap against the new viewport. Without this, an in-flight
-      // bot bubble that was just rendered at the previous bottom edge
-      // ends up clipped behind the newly-raised input/keyboard. Re-
-      // running smart-snap (not raw scrollToEnd) also handles the
+      const heightChanged = Math.abs(newHeight - prevHeight) > 1;
+      const shrank = prevHeight > 0 && newHeight + 1 < prevHeight;
+
+      // Rule 9: a chip-tray mount/swap was just armed. Smart-snap fires
+      // on ANY height change (shrink or grow) regardless of at-bottom or
+      // override — the prompt that owns the new chip row MUST be
+      // visible above it. One-shot.
+      if (snapAfterChromeRef.current && heightChanged && messagesRef.current.length > 0) {
+        snapAfterChromeRef.current = false;
+        userOverrideRef.current = false;
+        isAtBottomRef.current = true;
+        requestAnimationFrame(() => {
+          snapToLatest(false);
+          // Re-fire one frame later in case the chip tray's measure
+          // settled after the first snap.
+          requestAnimationFrame(() => snapToLatest(false));
+        });
+        return;
+      }
+
+      // Default: when the FlatList's visible height shrinks (keyboard
+      // rising, sticky chip row appearing) and the user was at-bottom,
+      // re-run smart-snap against the new viewport. Without this, an
+      // in-flight bot bubble that was just rendered at the previous
+      // bottom edge ends up clipped behind the newly-raised input or
+      // chip row. Smart-snap (not raw scrollToEnd) also handles the
       // "fit before, doesn't fit now" case: a bubble that fit before
       // the keyboard rose may overflow the smaller viewport, in which
       // case we anchor to its top instead of jamming the user behind
       // the keyboard.
       if (
-        prevHeight > 0
-        && newHeight + 1 < prevHeight
+        shrank
         && isAtBottomRef.current
         && !userOverrideRef.current
         && messagesRef.current.length > 0
       ) {
-        // Use requestAnimationFrame so the layout pass completes before
-        // we issue the scroll — otherwise the scroll uses a stale
-        // viewport height for its target offset.
         requestAnimationFrame(() => snapToLatest(false));
       }
     },
@@ -553,6 +611,7 @@ export function useChatScroll<T extends MinimalMessage>(
   }, []);
 
   return {
+    armSnapAfterChrome,
     listRef,
     pillOpacity,
     onScroll,

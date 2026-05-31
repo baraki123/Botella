@@ -205,7 +205,14 @@ export function ChatScreen({
   // Do NOT add ad-hoc scroll calls in this file — extend the hook in
   // mobile-template/ and copy.
   const scroll = useChatScroll<Message>(messages);
-  const { listRef, pillOpacity, jumpToLatest, setStreamActive, isAtBottomRef } = scroll;
+  const {
+    listRef,
+    pillOpacity,
+    jumpToLatest,
+    setStreamActive,
+    isAtBottomRef,
+    armSnapAfterChrome,
+  } = scroll;
   // ID of the FIRST bot bubble that arrived while the user was scrolled
   // away. The Bubble for this ID renders the NewBeatMark in its gutter
   // — a gold rule tracing upward + a dot bloom, telling the user "the
@@ -295,39 +302,37 @@ export function ChatScreen({
     return null;
   }, [messages]);
 
-  // RULE: when a new chip-bearing question arrives, the bubble carrying
-  // the question MUST be visible. Smart-snap is gated on
-  // `isAtBottomRef`, so if the user happened to drift off-bottom in the
-  // moments before the question landed (geocode pause, brief touch,
-  // keyboard rise), the chip row would surface in the sticky tray
-  // while the question text sits above the viewport — chips covering
-  // the prompt they answer. Override at-bottom: when a fresh chip
-  // message with prompt text appears, force a jumpToLatest so the
-  // question is visible just above the chip row.
+  // Rule 9 of the useChatScroll contract: the prompt that owns the
+  // current sticky chip row MUST be visible above it. When the chip
+  // row mounts, swaps, or unmounts (latestChipMessage.id transitions),
+  // arm `armSnapAfterChrome()` so the very next FlatList onLayout
+  // event (whether shrink from the chip tray appearing or grow from
+  // it disappearing) fires smart-snap REGARDLESS of `isAtBottomRef`.
   //
-  // Excludes the paginated_read Continue chip — that single-option
-  // "__paginated_advance" case is owned by smart-snap (long section
-  // bubbles use Case B; calling jumpToLatest here would overshoot the
-  // top of the new section).
+  // We don't filter on prompt-text being non-empty — empty-prompt chips
+  // attach to the previous bot bubble, and THAT bubble's prompt still
+  // needs to land above the chips. We don't skip paginated_advance
+  // either — the buffered render is short enough that smart-snap's
+  // Case A handles it cleanly, and skipping leaves the long previous
+  // section ambiguously framed under the new Continue chip.
+  //
+  // Also defensively kicks a jumpToLatest one rAF later in case the
+  // chip tray's first layout pass already settled before our arm
+  // landed (concurrent-render edge case).
   const prevChipMessageIdRef = useRef<string | null>(null);
   useEffect(() => {
     const id = latestChipMessage?.id ?? null;
     const prev = prevChipMessageIdRef.current;
     prevChipMessageIdRef.current = id;
-    if (!id || id === prev) return;
-    if (!latestChipMessage?.text) return;
-    const isPaginatedContinue = (latestChipMessage.quickReplies || []).some(
-      (opt) => {
-        const v = typeof opt === "string" ? opt : (opt as { value?: string }).value;
-        return v === "__paginated_advance";
-      },
-    );
-    if (isPaginatedContinue) return;
-    // Defer a frame so the FlatList finishes laying out the new bubble +
-    // the sticky chip row before we scroll; otherwise scrollToEnd targets
-    // a viewport that's still the old (taller) size.
-    requestAnimationFrame(() => jumpToLatest());
-  }, [latestChipMessage, jumpToLatest]);
+    if (id === prev) return;
+    armSnapAfterChrome();
+    // Two-frame defer so the chip tray's layout commits before we
+    // scroll. Otherwise scrollToEnd targets a viewport that's still
+    // the pre-chip-tray (taller) size. Belt-and-braces alongside the
+    // armSnapAfterChrome onLayout path — covers the case where no
+    // height change actually occurs (e.g. chip swap of the same row).
+    requestAnimationFrame(() => requestAnimationFrame(() => jumpToLatest()));
+  }, [latestChipMessage, armSnapAfterChrome, jumpToLatest]);
 
   // Detect the active language from message content so RTL-aware UI
   // (composer placeholder, bubble dot side) can respond. Sniff only
