@@ -34,22 +34,26 @@ from botella.contract import (
 async def run(
     msg: InboundMessage, manifest: BotManifest
 ) -> AsyncIterator[OutboundEvent]:
-    """Process one inbound message. Loads session, dispatches, saves session."""
+    """Process one inbound message. Loads session, dispatches, saves session.
+
+    `msg.text` is normalized in place at this boundary (leading whitespace
+    + Unicode bidi/format controls stripped) so every flow state, trigger,
+    voice-derived turn, and free_chat hook sees clean text. iOS Hebrew (and
+    some Android RTL) keyboards inject U+200E LRM before user input — and
+    Whisper transcriptions can carry the same prefix — without this,
+    matchers like `txt in ("english", "en")` silently miss on `"‎english"`
+    and the user perceives the flow as stalled. The strip runs AFTER
+    voice_handler so transcribed text gets the same treatment.
+    """
     storage = manifest.storage
     session = await storage.load_session(msg.user_id)
 
-    # Normalize leading bidi/format controls + whitespace once at the
-    # boundary so every flow state, every trigger, every free_chat hook
-    # sees clean text. iOS Hebrew (and some Android RTL) keyboards inject
-    # U+200E LRM before user-typed text — without this, a state matcher
-    # like `txt in ("english", "en")` silently misses on `"‎english"`
-    # and the user perceives the flow as stalled.
-    if msg.text is not None:
-        msg.text = _strip_invisible_prefix(msg.text)
-
-    # Voice → text preprocessing
+    # Voice → text preprocessing.
     if msg.voice_audio is not None and manifest.voice_handler is not None:
         msg = await manifest.voice_handler(msg, session, storage)
+
+    if msg.text is not None:
+        msg.text = _strip_invisible_prefix(msg.text)
 
     async for event in _dispatch(msg, session, manifest, storage):
         yield event
@@ -100,27 +104,42 @@ async def _dispatch(
     yield text("(no handler)")
 
 
-_BIDI_FORMAT_CHARS = (
-    "‎‏"          # LRM, RLM
+# Leading invisible characters this normalizer strips. Must be a SUPERSET of
+# the character class in layla-app/src/chat/ChatScreen.tsx (RESET_COMMAND_RE)
+# so the two sides agree on what is "effectively a leading slash."
+# Includes:
+#   · zero-width spacers ZWSP / ZWNJ / ZWJ (U+200B / U+200C / U+200D)
+#   · directional marks LRM / RLM (U+200E / U+200F)
+#   · LRE / RLE / PDF / LRO / RLO (U+202A-U+202E)
+#   · isolates LRI / RLI / FSI / PDI (U+2066-U+2069)
+#   · BOM / ZWNBSP (U+FEFF)
+_BIDI_FORMAT_CHARS = frozenset(
+    "​‌‍"  # ZWSP, ZWNJ, ZWJ
+    "‎‏"        # LRM, RLM
     "‪‫‬‭‮"  # LRE, RLE, PDF, LRO, RLO
     "⁦⁧⁨⁩"        # LRI, RLI, FSI, PDI
-    "﻿"                # BOM / ZWNBSP
+    "﻿"                          # BOM / ZWNBSP
 )
 
 
-def _strip_invisible_prefix(text: str) -> str:
-    """Strip leading whitespace + Unicode bidi/format controls.
+def _strip_invisible_prefix(s: str) -> str:
+    """Strip leading whitespace + Unicode bidi/format controls, in any order.
 
     iOS Hebrew (and some Android) keyboards inject a directional marker
     (typically U+200E LRM) before the visible text. Without this strip,
-    a `/newchart` typed in a Hebrew session arrives as `"\\u200e/newchart"`
+    `/newchart` typed in a Hebrew session arrives as `"\\u200e/newchart"`
     and `startswith("/")` is False — the debug slash silently falls
     through to free_chat / the active flow.
+
+    Real IME injection patterns interleave bidi marks and whitespace
+    ("‎ /newchart", "  ‎/newchart", " ‎ /newchart"), so we strip both
+    classes character-by-character until we hit a real character.
     """
-    s = text.lstrip()
-    while s and s[0] in _BIDI_FORMAT_CHARS:
-        s = s[1:]
-    return s
+    i = 0
+    n = len(s)
+    while i < n and (s[i].isspace() or s[i] in _BIDI_FORMAT_CHARS):
+        i += 1
+    return s[i:] if i else s
 
 
 def _match_trigger(msg: InboundMessage, manifest: BotManifest):

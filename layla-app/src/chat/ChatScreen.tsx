@@ -72,6 +72,26 @@ const PAGINATED_KEY_PREFIX = "layla:paginated_read:";
 const PAGINATED_KEY_FOR = (userId: string) =>
   `${PAGINATED_KEY_PREFIX}${userId}`;
 
+// Reset-detection: match /newchart (with optional leading whitespace / bidi
+// marks the iOS Hebrew IME injects) so a typed reset triggers the local
+// wipe in lockstep with the brain. ONLY /newchart — the brain's /reset
+// trigger clears session.flow/state but leaves the user record intact, so
+// wiping local chat for /reset would diverge the two sides.
+//
+// Character class MUST stay a subset of botella/runtime._BIDI_FORMAT_CHARS:
+//   · U+200B-U+200D  ZWSP / ZWNJ / ZWJ
+//   · U+200E-U+200F  LRM / RLM
+//   · U+202A-U+202E  LRE / RLE / PDF / LRO / RLO
+//   · U+2066-U+2069  LRI / RLI / FSI / PDI
+//   · U+FEFF         BOM / ZWNBSP
+// Module scope so the literal is allocated once per app load.
+const RESET_COMMAND_RE =
+  /^[\s​-‏‪-‮⁦-⁩﻿]*\/newchart\b/i;
+// Callback values that should also wipe the local chat tail before the WS
+// send. Keep in sync with botella_manifest.py's callback aliases for
+// destructive reset actions.
+const RESET_CALLBACK_VALUES = new Set(["__redo_map"]);
+
 // Fire-and-forget save / clear of the paginated buffer. `null` clears.
 // userId is optional so callers don't have to gate every call — the
 // helper no-ops when there's no session.
@@ -467,14 +487,12 @@ export function ChatScreen({
   // pendingMessage, this fires WITHOUT a user text bubble — the brain's
   // callback-trigger matcher runs as if a chip was tapped. Used by the
   // retired-slash-command replacements (__redo_map, __reread_map,
-  // __add_person, __link_telegram).
-  //
-  // __redo_map = "Re-do my map" — same effect as typing /newchart, so
-  // wipe the on-device chat tail first (parity with the text path).
+  // __add_person, __link_telegram). Reset-style callbacks (e.g.
+  // __redo_map) wipe the local chat tail for parity with the text path.
   useEffect(() => {
     if (!pendingCallback) return;
     if (status !== "open") return;
-    if (pendingCallback === "__redo_map") {
+    if (isResetFrame({ callback_data: pendingCallback })) {
       clearChatForReset();
     }
     streamRef.current?.send({ callback_data: pendingCallback });
@@ -760,11 +778,19 @@ export function ChatScreen({
     }
   }
 
-  // Match `/newchart` and `/reset` even with leading whitespace or a
-  // bidi/format prefix injected by an IME — same defense the brain runs
-  // via runtime._strip_invisible_prefix, mirrored here so the client-side
-  // reset fires whenever the brain-side reset will.
-  const RESET_COMMAND_RE = /^[\s​-‏‪-‮⁦-⁩﻿]*\/(newchart|reset)\b/i;
+  // Single source of truth for "will this outbound trigger the brain's
+  // newchart-style reset?" Used by send() (text path), pickQuickReply()
+  // (chip-tap path), and the pendingCallback effect (Settings rows).
+  function isResetFrame(frame: {
+    text?: string;
+    callback_data?: string;
+  }): boolean {
+    if (frame.callback_data && RESET_CALLBACK_VALUES.has(frame.callback_data)) {
+      return true;
+    }
+    if (frame.text && RESET_COMMAND_RE.test(frame.text)) return true;
+    return false;
+  }
 
   function send(
     text: string,
@@ -776,7 +802,7 @@ export function ChatScreen({
     // Sending also implies "I want to be at the latest" — `jumpToLatest`
     // clears any earlier scroll override so onContentSizeChange resumes
     // sticky-bottom-following.
-    if (RESET_COMMAND_RE.test(text)) {
+    if (isResetFrame({ text, callback_data: opts?.callback_data })) {
       clearChatForReset();
     }
     jumpToLatest();
@@ -892,6 +918,12 @@ export function ChatScreen({
     // `callback:__doorway_person` → start add_person flow). Free-text
     // chip values (yes/no, plain strings) are sent as text only.
     const isCallback = sendValue.startsWith("__");
+    // Reset-style chips (e.g. a future "Re-do my map" chip with value
+    // __redo_map) wipe the local chat tail for parity with send() and
+    // the Settings pendingCallback effect.
+    if (isResetFrame({ text: sendValue, callback_data: isCallback ? sendValue : undefined })) {
+      clearChatForReset();
+    }
     streamRef.current?.send(
       isCallback
         ? { text: sendValue, callback_data: sendValue }

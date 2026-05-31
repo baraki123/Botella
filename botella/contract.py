@@ -35,7 +35,15 @@ Transport = Literal["telegram", "ios", "android", "test"]
 
 @dataclass
 class InboundMessage:
-    """One message coming into the bot, normalized across transports."""
+    """One message coming into the bot, normalized across transports.
+
+    `text` is normalized by `runtime.run()` at the dispatcher boundary —
+    leading whitespace and Unicode bidi/format controls (LRM, RLM, ZWSP,
+    etc.) are stripped before any flow state, trigger, or free_chat hook
+    sees the message. Flow authors should NOT re-implement this strip
+    locally. If you genuinely need the raw inbound text (e.g. logging),
+    capture it inside the adapter before calling runtime.run.
+    """
     user_id: str
     transport: Transport
     text: str | None = None

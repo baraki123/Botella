@@ -105,3 +105,32 @@ async def test_trigger_matches_through_leading_whitespace():
         m,
     )
     assert [e.payload["text"] for e in out if e.type == "text"] == ["name?"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_matches_through_interleaved_bidi_and_whitespace():
+    # Real iOS Hebrew IME shapes: LRM-then-space, space-then-LRM, and a
+    # double-marker sandwich. A single-pass lstrip()+bidi-loop would leave
+    # the second class behind on each input. Each must reach the trigger.
+    m = _make_manifest()
+    for prefix in ("‎ ", " ‎", "‎ ‎", " ‎ ‎ "):
+        out = await _collect(
+            InboundMessage(user_id="u1", transport="test", text=f"{prefix}/start"),
+            m,
+        )
+        assert [e.payload["text"] for e in out if e.type == "text"] == ["name?"], (
+            f"prefix={prefix!r} stalled the trigger"
+        )
+
+
+@pytest.mark.asyncio
+async def test_trigger_matches_through_zero_width_space():
+    # ZWSP (U+200B) — paste-injected by some IMEs and by rich-text sources.
+    # Client RESET_COMMAND_RE matches it; the brain must too, or the two
+    # sides split-brain (client wipes chat, brain doesn't reset).
+    m = _make_manifest()
+    out = await _collect(
+        InboundMessage(user_id="u1", transport="test", text="​/start"),
+        m,
+    )
+    assert [e.payload["text"] for e in out if e.type == "text"] == ["name?"]
