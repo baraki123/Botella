@@ -91,12 +91,37 @@ async def _dispatch(
     yield text("(no handler)")
 
 
+_BIDI_FORMAT_CHARS = (
+    "‎‏"          # LRM, RLM
+    "‪‫‬‭‮"  # LRE, RLE, PDF, LRO, RLO
+    "⁦⁧⁨⁩"        # LRI, RLI, FSI, PDI
+    "﻿"                # BOM / ZWNBSP
+)
+
+
+def _strip_invisible_prefix(text: str) -> str:
+    """Strip leading whitespace + Unicode bidi/format controls.
+
+    iOS Hebrew (and some Android) keyboards inject a directional marker
+    (typically U+200E LRM) before the visible text. Without this strip,
+    a `/newchart` typed in a Hebrew session arrives as `"\\u200e/newchart"`
+    and `startswith("/")` is False — the debug slash silently falls
+    through to free_chat / the active flow.
+    """
+    s = text.lstrip()
+    while s and s[0] in _BIDI_FORMAT_CHARS:
+        s = s[1:]
+    return s
+
+
 def _match_trigger(msg: InboundMessage, manifest: BotManifest):
-    if msg.text and msg.text.startswith("/"):
-        cmd = msg.text.split(maxsplit=1)[0]
-        fn = manifest.triggers.get(cmd)
-        if fn is not None:
-            return fn
+    if msg.text:
+        stripped = _strip_invisible_prefix(msg.text)
+        if stripped.startswith("/"):
+            cmd = stripped.split(maxsplit=1)[0]
+            fn = manifest.triggers.get(cmd)
+            if fn is not None:
+                return fn
     if msg.callback_data:
         fn = manifest.triggers.get(f"callback:{msg.callback_data}")
         if fn is not None:

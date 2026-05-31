@@ -78,3 +78,30 @@ async def test_free_chat_runs_when_no_flow_active():
     m = _make_manifest()
     out = await _collect(InboundMessage(user_id="u1", transport="test", text="hello"), m)
     assert any("echo:?:hello" in e.payload.get("text", "") for e in out)
+
+
+@pytest.mark.asyncio
+async def test_trigger_matches_through_bidi_marker():
+    # iOS Hebrew keyboards inject U+200E (LRM) before the visible text.
+    # The trigger matcher must look past it so /newchart still works mid-flow.
+    m = _make_manifest()
+    # Park the user inside the flow at "got" so a fall-through would be observable.
+    await _collect(InboundMessage(user_id="u1", transport="test", text="/start"), m)
+    out = await _collect(
+        InboundMessage(user_id="u1", transport="test", text="‎/start"),
+        m,
+    )
+    # Trigger fired → entry state "ask" emitted "name?", flow re-entered.
+    assert [e.payload["text"] for e in out if e.type == "text"] == ["name?"]
+    s = await m.storage.load_session("u1")
+    assert s.state == "got"
+
+
+@pytest.mark.asyncio
+async def test_trigger_matches_through_leading_whitespace():
+    m = _make_manifest()
+    out = await _collect(
+        InboundMessage(user_id="u1", transport="test", text="  /start"),
+        m,
+    )
+    assert [e.payload["text"] for e in out if e.type == "text"] == ["name?"]
