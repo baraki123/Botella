@@ -987,6 +987,17 @@ const _rtlHeading = <T extends object>(s: T): T => ({
 const rtlMarkdownStyles = {
   ...markdownStyles,
   body: _rtl(markdownStyles.body),
+  // react-native-markdown-display renders each paragraph's inline content
+  // inside a `textgroup` <Text> (and leaf `text` nodes). textAlign /
+  // writingDirection set on `body` or `paragraph` (both Views) does NOT
+  // cascade to these Text nodes in RN — so SHORT single-line Hebrew
+  // paragraphs (standalone questions like "אז מה המשמעות?") fell back to
+  // the LTR page's start edge and read as left/centered, while long
+  // wrapping paragraphs happened to resolve right by content direction.
+  // Setting RTL explicitly on the text-bearing nodes is the only reliable
+  // lever — pin every line to the right edge.
+  textgroup: _rtl({}),
+  text: _rtl({}),
   // Hebrew lines run longer (no caps, denser word forms) and a 12px
   // gap between paragraphs reads as no gap at all — paragraphs blur
   // into one wall of text. Bump to 18px so distinct thoughts breathe
