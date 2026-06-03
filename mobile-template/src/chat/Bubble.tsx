@@ -973,7 +973,10 @@ const rtlMarkdownStyles = {
   // edge and read as left/centered, while long wrapping paragraphs
   // happened to resolve right by content direction. Setting RTL explicitly
   // on the text-bearing nodes is the only reliable lever.
-  textgroup: _rtl({}),
+  // alignSelf: flex-end pushes the textgroup to the right edge on native
+  // iOS (where RN honors the Text style); on web the paragraph's
+  // alignItems: flex-end does the same job since RNW ignores this here.
+  textgroup: { ..._rtl({}), alignSelf: "flex-end" as const },
   text: _rtl({}),
   // Hebrew lines run longer (no caps, denser word forms) and a 12px
   // gap between paragraphs reads as no gap at all — paragraphs blur
@@ -983,6 +986,14 @@ const rtlMarkdownStyles = {
   paragraph: {
     ..._rtl(markdownStyles.paragraph),
     marginBottom: 18,
+    // The paragraph is a real <View>; the textgroup <Text> inside it
+    // shrink-wraps to content width. On web, RNW does NOT honor
+    // writingDirection/textAlign on that textgroup <Text>, so a SHORT
+    // Hebrew line stays pinned to the LEFT even though its own textAlign
+    // is "right". alignItems: flex-end is a View prop RNW always applies
+    // — it pushes the textgroup to the right edge so short standalone
+    // lines hug the right like long ones.
+    alignItems: "flex-end" as const,
   },
   heading1: _rtlHeading(markdownStyles.heading1),
   heading2: _rtlHeading(markdownStyles.heading2),
