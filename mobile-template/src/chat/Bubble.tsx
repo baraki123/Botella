@@ -952,6 +952,16 @@ const _rtl = <T extends object>(s: T): T => ({
   writingDirection: "rtl",
 }) as unknown as T;
 
+// Headings render as a CONTENT-WIDTH element (not full-width like
+// paragraphs), so `textAlign: right` inside their own shrink-wrapped box
+// is a no-op — the heading sits at the LEFT of the bubble while the body
+// text below it is right-aligned. Push the heading box itself to the
+// right edge of its column so Hebrew section titles align with the body.
+const _rtlHeading = <T extends object>(s: T): T => ({
+  ..._rtl(s),
+  alignSelf: "flex-end",
+}) as unknown as T;
+
 const rtlMarkdownStyles = {
   ...markdownStyles,
   body: _rtl(markdownStyles.body),
@@ -964,19 +974,19 @@ const rtlMarkdownStyles = {
     ..._rtl(markdownStyles.paragraph),
     marginBottom: 18,
   },
-  heading1: _rtl(markdownStyles.heading1),
-  heading2: _rtl(markdownStyles.heading2),
+  heading1: _rtlHeading(markdownStyles.heading1),
+  heading2: _rtlHeading(markdownStyles.heading2),
   // Heading3 (tier labels on the chart bubble) needs an extra nudge —
   // the textTransform: uppercase + letter-spacing 2 we use for the
   // manuscript caps treatment was suppressing the writingDirection on
   // some Hebrew strings. Drop both for RTL renders; Hebrew has no
   // case + extra letter-spacing breaks bidi grouping for Hebrew chars.
   heading3: {
-    ..._rtl(markdownStyles.heading3),
+    ..._rtlHeading(markdownStyles.heading3),
     textTransform: "none" as const,
     letterSpacing: 0.3,
   },
-  heading4: _rtl(markdownStyles.heading4),
+  heading4: _rtlHeading(markdownStyles.heading4),
   // strong + em both ultimately render Hebrew text inside a paragraph;
   // the paragraph's writingDirection should cascade but RN inheritance
   // for writingDirection is patchy. Set explicitly so bold "**עקרב**"
