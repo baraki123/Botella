@@ -113,6 +113,9 @@ function persistPaginatedBuffer(
 export interface ChatScreenProps {
   onOpenSettings?: () => void;
   onOpenPeople?: () => void;
+  /** Open the Episodes shelf. Optional episodeId auto-opens that episode's
+   * player (used by the post-first-map "Listen to your map" entry). */
+  onOpenEpisodes?: (episodeId?: string) => void;
   /** When non-null, ChatScreen sends this text to the WS as soon as
    * the connection is open and clears the slot via onPendingConsumed.
    * Used by the People tab's "+" button and "Talk to Layla about X"
@@ -136,6 +139,7 @@ export interface ChatScreenProps {
 export function ChatScreen({
   onOpenSettings,
   onOpenPeople,
+  onOpenEpisodes,
   pendingMessage,
   pendingFocusPersonId,
   pendingCallback,
@@ -1027,6 +1031,7 @@ export function ChatScreen({
           status={status}
           onOpenSettings={onOpenSettings}
           onOpenPeople={onOpenPeople}
+          onOpenEpisodes={onOpenEpisodes ? () => onOpenEpisodes() : undefined}
         />
 
         <View style={styles.listWrap}>
@@ -1209,10 +1214,12 @@ function ChatHeader({
   status,
   onOpenSettings,
   onOpenPeople,
+  onOpenEpisodes,
 }: {
   status: "open" | "connecting" | "closed";
   onOpenSettings?: () => void;
   onOpenPeople?: () => void;
+  onOpenEpisodes?: () => void;
 }) {
   const dotColor = useMemo(() => {
     if (status === "open") return theme.statusOpen;
@@ -1236,6 +1243,21 @@ function ChatHeader({
           <Text style={styles.headerTitle}>{product.name}</Text>
         </View>
         <View style={styles.headerRight}>
+          {onOpenEpisodes ? (
+            <Pressable
+              onPress={onOpenEpisodes}
+              style={({ pressed }) => [
+                styles.settingsBtn,
+                pressed && { opacity: 0.5 },
+              ]}
+              accessibilityLabel="Listen to your episodes"
+              accessibilityRole="button"
+              hitSlop={10}
+              testID="header-episodes-button"
+            >
+              <Text style={styles.episodesIcon}>♫</Text>
+            </Pressable>
+          ) : null}
           {onOpenPeople ? (
             <Pressable
               onPress={onOpenPeople}
@@ -1344,6 +1366,7 @@ const styles = StyleSheet.create({
   },
   settingsIcon: { fontSize: 24, color: theme.textSubtle, lineHeight: 24 },
   peopleIcon: { fontSize: 19, color: theme.accent, lineHeight: 24 },
+  episodesIcon: { fontSize: 18, color: theme.accent, lineHeight: 24 },
   statusDot: {
     width: 8,
     height: 8,

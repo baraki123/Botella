@@ -7,11 +7,12 @@ import { ChatScreen } from "./src/chat/ChatScreen";
 import { loadCachedSession, type Session } from "./src/auth/anonymous";
 import { SignInScreen } from "./src/auth/SignInScreen";
 import { PeopleScreen } from "./src/people/PeopleScreen";
+import { EpisodeScreen } from "./src/episodes/EpisodeScreen";
 import { SettingsScreen } from "./src/settings/SettingsScreen";
 import { theme } from "./src/config/theme";
 import { registerForPushNotifications } from "./src/push/registerPush";
 
-type Route = "signin" | "chat" | "settings" | "people";
+type Route = "signin" | "chat" | "settings" | "people" | "episodes";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -32,6 +33,9 @@ export default function App() {
   // retired slash commands. Fires WITHOUT a user-text bubble — the
   // brain's callback-trigger matcher handles it directly.
   const [pendingCallback, setPendingCallback] = useState<string | null>(null);
+  // Which episode to auto-open when entering the Episodes shelf (e.g. the
+  // post-first-map "Listen to your map" chip passes the first-map id).
+  const [pendingEpisodeId, setPendingEpisodeId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +89,10 @@ export default function App() {
         <ChatScreen
           onOpenSettings={() => setRoute("settings")}
           onOpenPeople={() => setRoute("people")}
+          onOpenEpisodes={(episodeId?: string) => {
+            setPendingEpisodeId(episodeId ?? null);
+            setRoute("episodes");
+          }}
           pendingMessage={pendingChatMessage}
           pendingFocusPersonId={pendingFocusPersonId}
           pendingCallback={pendingCallback}
@@ -114,6 +122,20 @@ export default function App() {
               onSendToChat={(text, focusPersonId) => {
                 setPendingChatMessage(text);
                 setPendingFocusPersonId(focusPersonId ?? null);
+                setRoute("chat");
+              }}
+            />
+          </View>
+        ) : null}
+        {route === "episodes" ? (
+          <View style={StyleSheet.absoluteFillObject}>
+            <EpisodeScreen
+              jwt={session.jwt}
+              userId={session.userId}
+              autoOpenEpisodeId={pendingEpisodeId}
+              onClose={() => setRoute("chat")}
+              onAskLayla={(text) => {
+                setPendingChatMessage(text);
                 setRoute("chat");
               }}
             />
