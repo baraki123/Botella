@@ -383,6 +383,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 17,
     color: theme.text,
+    // Rest at two rows (2 × lineHeight 24 + paddingVertical 11×2 = 70) so a
+    // second line is always visible — the web textarea doesn't reliably
+    // auto-grow on the first wrap.
+    minHeight: 70,
     maxHeight: 140,
     lineHeight: 24,
     // RN-Web injects a browser focus ring on the underlying <textarea>;
