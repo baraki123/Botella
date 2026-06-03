@@ -986,14 +986,15 @@ const rtlMarkdownStyles = {
   paragraph: {
     ..._rtl(markdownStyles.paragraph),
     marginBottom: 18,
-    // The paragraph is a real <View>; the textgroup <Text> inside it
-    // shrink-wraps to content width. On web, RNW does NOT honor
-    // writingDirection/textAlign on that textgroup <Text>, so a SHORT
-    // Hebrew line stays pinned to the LEFT even though its own textAlign
-    // is "right". alignItems: flex-end is a View prop RNW always applies
-    // — it pushes the textgroup to the right edge so short standalone
-    // lines hug the right like long ones.
-    alignItems: "flex-end" as const,
+    // markdown-display's `paragraph` is a flex ROW (flexDirection:"row",
+    // flexWrap:"wrap"). The textgroup <Text> inside shrink-wraps to content
+    // width, and on web RNW ignores writingDirection/textAlign on that
+    // <Text> — so a SHORT Hebrew line stays pinned LEFT even though its own
+    // textAlign is "right". On a row the HORIZONTAL axis is justifyContent
+    // (alignItems is vertical), so justifyContent:"flex-end" pushes the
+    // textgroup to the right edge. Long lines fill the width and are
+    // unaffected; short standalone lines now hug the right like the rest.
+    justifyContent: "flex-end" as const,
   },
   heading1: _rtlHeading(markdownStyles.heading1),
   heading2: _rtlHeading(markdownStyles.heading2),
