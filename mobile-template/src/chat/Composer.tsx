@@ -92,8 +92,12 @@ export function Composer({
     }
   };
 
-  const armIdleTimer = () => {
+  // Auto-dismiss the keyboard only when the field is EMPTY (tap-and-walked-
+  // away). NEVER while the user is mid-compose — a reflective answer has
+  // long thinking pauses, and stealing the keyboard mid-thought is hostile.
+  const armIdleTimer = (currentText: string) => {
     clearIdleTimer();
+    if (currentText.trim()) return; // mid-compose → keep the keyboard
     idleTimerRef.current = setTimeout(() => {
       Keyboard.dismiss();
       idleTimerRef.current = null;
@@ -102,7 +106,7 @@ export function Composer({
 
   const handleChangeText = (next: string) => {
     setValue(next);
-    armIdleTimer();
+    armIdleTimer(next);
   };
 
   // Clean up timer on unmount.
@@ -140,10 +144,9 @@ export function Composer({
             onChangeText={handleChangeText}
             onFocus={() => {
               setFocused(true);
-              // Don't dismiss immediately on focus — only after idle.
-              // Arm the timer so simply opening the keyboard without
-              // typing also closes it after 3s.
-              armIdleTimer();
+              // Arm the empty-field idle dismiss; once the user types
+              // anything, handleChangeText clears it (see armIdleTimer).
+              armIdleTimer(value);
             }}
             onBlur={() => {
               setFocused(false);
