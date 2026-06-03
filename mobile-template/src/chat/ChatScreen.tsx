@@ -906,20 +906,27 @@ export function ChatScreen({
               }, 80);
             }}
             scrollEventThrottle={32}
-            // Chat conversations rarely exceed a few hundred messages,
-            // and the rendered cost per bubble is small (text + a gold
-            // dot). Aggressive virtualization removes earlier bubbles
-            // from the DOM when many messages arrive in close succession
-            // (e.g. the first map read emits 4 bubbles in <100ms after
-            // a long LLM call) — the user is then scrolled to the
-            // sticky-bottom and earlier messages aren't in the DOM until
-            // they scroll up. Defaults: windowSize=21, removeClippedSubviews
-            // depending on platform. We bump up so the first ~50 messages
-            // stay mounted and any sticky-bottom scroll keeps the prior
-            // bubbles available.
-            initialNumToRender={50}
-            windowSize={50}
-            maxToRenderPerBatch={30}
+            // Chat conversations rarely exceed a few hundred messages, and
+            // the rendered cost per bubble is small (text + a gold dot), so
+            // we effectively DISABLE virtualization for this list and render
+            // every message eagerly.
+            //
+            // Why: with a fixed `initialNumToRender={50}` the list mounted
+            // items 0..49 and then dead-locked — `scrollToEnd` targets the
+            // last *mounted* row (~49), so the viewport never reached items
+            // 50+, so they never batch-mounted, so `scrollToEnd` could never
+            // reach them. Once total messages crossed ~50 the newest bubble +
+            // the bot reply landed in state + the persisted tail but never
+            // mounted in the DOM — looked exactly like "the bot stopped
+            // responding." (Bumping the constant just moves the cliff.)
+            // Driving `initialNumToRender` from the data length keeps the
+            // tail mounted at every render, removeClippedSubviews keeps
+            // mounted rows in the tree, and a generous windowSize/batch
+            // covers any sticky-bottom scroll. The on-device tail is capped
+            // at 60 (see the persistence effect above), so this stays bounded.
+            initialNumToRender={Math.max(50, messages.length)}
+            windowSize={Math.max(50, messages.length)}
+            maxToRenderPerBatch={50}
             removeClippedSubviews={false}
           />
           {/* "↓ Latest" pill hidden per product call — the smart-snap
