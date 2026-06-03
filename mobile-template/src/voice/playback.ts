@@ -35,8 +35,12 @@ import {
 import { Platform } from "react-native";
 
 import { getCurrentJwt } from "../auth/anonymous";
-import { product } from "../config/product";
-import { bytesToBase64 } from "../lib/base64";
+import {
+  audioCacheKey,
+  fetchAudioUri,
+  prefetchAudioUri,
+} from "./audioCache";
+import { setStopper, stopOthers } from "./coordinator";
 
 // Re-export so the previous import path keeps working (Bubble.tsx etc.
 // imports getCurrentJwt from voice/playback). Source of truth lives in
@@ -45,11 +49,6 @@ export { getCurrentJwt };
 
 const VOICE_TOGGLE_KEY = "layla:voice_playback_enabled";
 const VOICE_DEFAULT = false;
-
-// LRU map of (cache_key) → blob URL (web) or local file URI (native).
-// Bound at 64 entries so a long session doesn't leak memory.
-const _audioCache = new Map<string, string>();
-const _CACHE_MAX = 64;
 
 let _currentPlayer: AudioPlayer | null = null;
 // Subscribers get notified when the playing-state changes so bubbles
@@ -104,12 +103,9 @@ export async function setVoicePlaybackEnabled(enabled: boolean): Promise<void> {
 // ─── Cache key ────────────────────────────────────────────────────────────
 
 
-export function bubbleCacheKey(text: string, voice = "shimmer"): string {
-  // Keep it human — voice + first 80 chars + length so different
-  // bubbles with similar prefixes don't collide.
-  const head = text.slice(0, 80);
-  return `${voice}:${text.length}:${head}`;
-}
+// Back-compat alias — Bubble.tsx imports bubbleCacheKey from here. The cache
+// key now lives in audioCache.ts (shared with the episode player).
+export const bubbleCacheKey = audioCacheKey;
 
 
 // ─── Stop / pause ─────────────────────────────────────────────────────────
@@ -130,95 +126,34 @@ export function stopPlayback() {
 }
 
 
+// Register the bubble stopper so the episode player can silence us (and
+// vice-versa) — one voice at a time.
+setStopper("bubble", stopPlayback);
+
+
 // ─── Fetch + play ─────────────────────────────────────────────────────────
 
-
-async function _fetchAudioBlobUrl(
-  text: string,
-  voice: string,
-  jwt: string,
-): Promise<string> {
-  const key = bubbleCacheKey(text, voice);
-  const cached = _audioCache.get(key);
-  if (cached) {
-    // Move to end (LRU touch).
-    _audioCache.delete(key);
-    _audioCache.set(key, cached);
-    return cached;
-  }
-  const res = await fetch(`${product.apiUrl}/v1/tts/synthesize`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ text, voice }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`TTS synth failed (${res.status}): ${detail.slice(0, 200)}`);
-  }
-
-  let url: string;
-  if (Platform.OS === "web" && typeof URL !== "undefined" && URL.createObjectURL) {
-    // Web: object URL → <audio>'s src works directly. Blob is fine here.
-    const blob = await res.blob();
-    url = URL.createObjectURL(blob);
-  } else {
-    // Native (iOS/Android): AVPlayer / ExoPlayer reject `data:` URIs in
-    // practice — passing one to createAudioPlayer stalls in a never-
-    // loaded state (the bug: Listen button stuck on "Loading…"). Write
-    // the bytes to a real file and play from `file://` instead.
-    //
-    // RN's Blob doesn't implement `.arrayBuffer()`; read the Response
-    // directly via `res.arrayBuffer()`. Then base64 → temp file via
-    // expo-file-system/legacy (the typed API on 19+ ships as throwing
-    // stubs — see CLAUDE.md).
-    const FS = require("expo-file-system/legacy");
-    const buf = await res.arrayBuffer();
-    const base64 = bytesToBase64(buf);
-    // Hash-stable filename so repeated requests reuse the same file.
-    const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-    const fileUri = `${FS.cacheDirectory}tts-${safeKey}.mp3`;
-    await FS.writeAsStringAsync(fileUri, base64, {
-      encoding: FS.EncodingType.Base64,
-    });
-    url = fileUri;
-  }
-  _audioCache.set(key, url);
-  if (_audioCache.size > _CACHE_MAX) {
-    const oldest = _audioCache.keys().next().value;
-    if (oldest) _audioCache.delete(oldest);
-  }
-  return url;
-}
-
-
-// In-flight prefetch keys. Stops a second prefetch call (e.g. from a
-// re-render) from queuing a duplicate request before the first lands.
-const _prefetchInFlight = new Set<string>();
-
 /**
- * Fire-and-forget pre-fetch of TTS audio so a later `togglePlay` is
- * instant. Idempotent: a second call with the same text+voice is a
- * no-op while one is in flight or already cached. Errors silent.
+ * Fire-and-forget pre-fetch of the TTS audio for a given text. Warms the
+ * in-memory cache so a subsequent `togglePlay` is instant (no 15-25s
+ * synth wait on first tap). Idempotent: a second call with the same
+ * text+voice is a no-op while the first is in flight, or once cached.
+ *
+ * Gating happens at the caller (ChatScreen) — we only prefetch when:
+ *   - voice playback is enabled in Settings (cost),
+ *   - the bubble is long enough to render a Listen affordance (≥ 220 chars),
+ *   - the bubble has finished streaming.
+ *
+ * Errors are swallowed silently: if the prefetch fails, the user's
+ * eventual Listen tap falls back to the on-demand fetch + surfaces the
+ * error on the button.
  */
 export async function prefetchAudio(opts: {
   text: string;
   voice?: string;
   jwt: string;
 }): Promise<void> {
-  const voice = opts.voice ?? "shimmer";
-  const key = bubbleCacheKey(opts.text, voice);
-  if (_audioCache.has(key) || _prefetchInFlight.has(key)) return;
-  _prefetchInFlight.add(key);
-  try {
-    await _fetchAudioBlobUrl(opts.text, voice, opts.jwt);
-  } catch {
-    // Silent — togglePlay's caller surfaces the error if the user taps.
-  } finally {
-    _prefetchInFlight.delete(key);
-  }
+  await prefetchAudioUri(opts.text, opts.voice ?? "shimmer", opts.jwt);
 }
 
 /**
@@ -250,8 +185,9 @@ export async function togglePlay(opts: {
     return;
   }
 
-  // Always stop any existing playback before starting new.
+  // Stop our own playback AND any episode playback before starting new.
   stopPlayback();
+  stopOthers("bubble");
 
   // On native, set audio mode so playback works in silent mode + over
   // calls etc. (no-op on web). Best-effort.
@@ -263,7 +199,7 @@ export async function togglePlay(opts: {
 
   let url: string;
   try {
-    url = await _fetchAudioBlobUrl(opts.text, voice, opts.jwt);
+    url = await fetchAudioUri(opts.text, voice, opts.jwt);
     console.log(`[tts] got audio URL (${url.slice(0, 60)}...)`);
   } catch (e) {
     console.warn(`[tts] _fetchAudioBlobUrl FAILED:`, e);
