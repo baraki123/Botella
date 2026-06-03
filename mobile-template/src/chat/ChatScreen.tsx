@@ -185,7 +185,7 @@ export function ChatScreen({
   // Do NOT add ad-hoc scroll calls in this file — extend the hook in
   // mobile-template/ and copy.
   const scroll = useChatScroll<Message>(messages);
-  const { listRef, pillOpacity, jumpToLatest, setStreamActive } = scroll;
+  const { listRef, pillOpacity, jumpToLatest, setStreamActive, armSnapTopNextArrival } = scroll;
   // Debounce flipping setStreamActive(false) — when the brain emits
   // `complete` then immediately starts a chip/quick_replies/text in
   // the same handler tick, we want the scroll hook to stay in
@@ -598,6 +598,9 @@ export function ChatScreen({
         const doorways: QuickReplyOption[] = event.payload.doorway_options || [];
         if (sections.length === 0) return;
         const firstLabel = chipLabels[0] || "Continue →";
+        // Anchor the section's TOP to the viewport (start of the read),
+        // not its end — see useChatScroll rule 2b.
+        armSnapTopNextArrival();
         setMessages((m) => [
           ...m,
           {
@@ -802,6 +805,9 @@ export function ChatScreen({
     }
     const nextText = state.sections[0];
     const nextLabel = state.chipLabels[0] || "Continue →";
+    // Anchor the new section's TOP to the viewport so the user starts
+    // reading at the beginning of the block — see useChatScroll rule 2b.
+    armSnapTopNextArrival();
     setMessages((m) => [
       ...m,
       {

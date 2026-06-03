@@ -30,6 +30,15 @@
  * ║            prior context as a visual anchor that this is a new  ║
  * ║            message block.                                        ║
  * ║                                                                  ║
+ * ║      2b. BIG-BLOCK REVEAL (first-map read section turned via the ║
+ * ║          Continue chip): always anchor the new bubble's TOP to   ║
+ * ║          the viewport (armSnapTopNextArrival → snapToLatestTop,   ║
+ * ║          via scrollToIndex). Turning the page is a deliberate     ║
+ * ║          "start the next section" action, so this fires even if  ║
+ * ║          the user drifted off-bottom, and bypasses the Case A/B  ║
+ * ║          fit test — that test mis-lands the user at the section's║
+ * ║          END because tall Markdown measures its height late.     ║
+ * ║                                                                  ║
  * ║      Smart-snap fires only while the user is at-bottom           ║
  * ║      (isAtBottomRef true) and hasn't dragged away                ║
  * ║      (userOverrideRef false). The trigger is bubble ARRIVAL —   ║
@@ -152,6 +161,12 @@ export interface ChatScrollControls<T extends MinimalMessage> {
    * user wasn't following the tail at the moment the chip landed.
    * One-shot — clears after firing. */
   armSnapAfterChrome: () => void;
+  /** Call ONCE right before appending a large read block (a first-map
+   * read section, revealed by the Continue chip). The next new-bubble
+   * arrival anchors that bubble's TOP to the viewport (start of the
+   * section), instead of running the fit-based Case A/B decision which
+   * mis-lands the user at the section's END. One-shot. */
+  armSnapTopNextArrival: () => void;
   /** Pass to <FlatList ref={listRef} … />. */
   listRef: React.RefObject<FlatList<T> | null>;
   /** Pass to <Animated.View style={{ opacity: pillOpacity }}>…</Animated.View>
@@ -301,6 +316,16 @@ export function useChatScroll<T extends MinimalMessage>(
     snapAfterChromeRef.current = true;
   }, []);
 
+  // Set by ChatScreen via `armSnapTopNextArrival()` right before it
+  // appends a big read block (a first-map section via the Continue
+  // chip). Tells the next NEW-bubble onContentSizeChange to anchor that
+  // bubble's TOP to the viewport (snapToLatestTop) instead of running
+  // the fit-based Case A/B decision — see rule 2b. One-shot.
+  const snapTopNextArrivalRef = useRef(false);
+  const armSnapTopNextArrival = useCallback(() => {
+    snapTopNextArrivalRef.current = true;
+  }, []);
+
   // True while a real LLM token stream is in flight, set by ChatScreen
   // via setStreamActive(). Three behaviors flip while true:
   //  · sticky-bottom uses rAF-coalesced scrollToOffset(animated:false)
@@ -351,6 +376,34 @@ export function useChatScroll<T extends MinimalMessage>(
     }
     prevMessageCountRef.current = curr;
   }, [messages]);
+
+  // Force the latest bubble's TOP to the viewport top (plus one line of
+  // prior context), regardless of whether it fits. Used for explicit
+  // "reveal a big block" actions — the first-map read's section
+  // pagination — where the user is turning the page and wants to START
+  // reading at the top of the new block, never be dropped at its end.
+  //
+  // Uses scrollToIndex (not the contentHeight math snapToLatest relies
+  // on) because a tall Markdown section measures its height late on web:
+  // by the time the height-comparison runs, contentH is still short, so
+  // Case A (scrollToEnd) wins and the user lands at the BOTTOM of the
+  // section. scrollToIndex asks the list for the item's own offset, which
+  // is correct independent of when the Markdown finishes measuring.
+  // viewOffset shows ONE_LINE_PX of the previous block as a "this is a
+  // new section" anchor. onScrollToIndexFailed (wired in the screen)
+  // rescues the rare case where the row isn't measured yet.
+  const snapToLatestTop = useCallback((animated: boolean) => {
+    const list = listRef.current;
+    if (!list) return;
+    const lastIndex = messagesRef.current.length - 1;
+    if (lastIndex < 0) return;
+    list.scrollToIndex({
+      index: lastIndex,
+      viewPosition: 0,
+      viewOffset: ONE_LINE_PX,
+      animated,
+    });
+  }, []);
 
   // Run the smart-snap rule: Case A (fits) → scrollToEnd; Case B
   // (overflows) → scroll so the new bubble's top is one line below
@@ -423,8 +476,25 @@ export function useChatScroll<T extends MinimalMessage>(
       // Update the canonical content-height *before* dispatching the
       // scroll — snapToLatest reads it.
       prevContentHeightRef.current = contentHeight;
-      if (userOverrideRef.current) return;
       if (messagesRef.current.length === 0) return;
+      // Rule 2b: an explicit big-block reveal (a first-map read section
+      // turned via the Continue chip) anchors the new bubble's TOP to the
+      // viewport, even if the user had drifted off-bottom — turning the
+      // page is a deliberate "take me to the start of the next section"
+      // action, and the fit-based Case A/B test mis-fires here because the
+      // tall Markdown section measures its height late (lands the user at
+      // the section's END). One-shot; fires only on the new-bubble pass.
+      if (snapTopNextArrivalRef.current && pendingNewBubbleRef.current) {
+        snapTopNextArrivalRef.current = false;
+        pendingNewBubbleRef.current = false;
+        userOverrideRef.current = false;
+        snapToLatestTop(true);
+        requestAnimationFrame(() => {
+          if (!userOverrideRef.current) snapToLatestTop(false);
+        });
+        return;
+      }
+      if (userOverrideRef.current) return;
       // Bulk arrival path: jump to bottom of the whole loaded thread
       // without smart-snap (which would otherwise anchor to the top
       // of the FIRST message for a very tall loaded thread).
@@ -485,7 +555,7 @@ export function useChatScroll<T extends MinimalMessage>(
         }
       });
     },
-    [snapToLatest],
+    [snapToLatest, snapToLatestTop],
   );
 
   const onLayout = useCallback(
@@ -612,6 +682,7 @@ export function useChatScroll<T extends MinimalMessage>(
 
   return {
     armSnapAfterChrome,
+    armSnapTopNextArrival,
     listRef,
     pillOpacity,
     onScroll,

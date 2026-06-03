@@ -212,6 +212,7 @@ export function ChatScreen({
     setStreamActive,
     isAtBottomRef,
     armSnapAfterChrome,
+    armSnapTopNextArrival,
   } = scroll;
   // ID of the FIRST bot bubble that arrived while the user was scrolled
   // away. The Bubble for this ID renders the NewBeatMark in its gutter
@@ -715,6 +716,9 @@ export function ChatScreen({
         const doorways: QuickReplyOption[] = event.payload.doorway_options || [];
         if (sections.length === 0) return;
         const firstLabel = chipLabels[0] || "Continue →";
+        // Anchor the section's TOP to the viewport (start of the read),
+        // not its end — see useChatScroll rule 2b.
+        armSnapTopNextArrival();
         setMessages((m) => [
           ...m,
           {
@@ -958,6 +962,9 @@ export function ChatScreen({
     }
     const nextText = state.sections[0];
     const nextLabel = state.chipLabels[0] || "Continue →";
+    // Anchor the new section's TOP to the viewport so the user starts
+    // reading at the beginning of the block — see useChatScroll rule 2b.
+    armSnapTopNextArrival();
     setMessages((m) => [
       ...m,
       {
