@@ -898,6 +898,15 @@ export function ChatScreen({
       advancePaginatedRead();
       return;
     }
+    // "▶ Listen to your map" — open the episode player for the first-map
+    // episode. Like invite-share: no WS send, no user bubble, and the
+    // doorway chips stay so the user can still pick a doorway after.
+    if (sendValue === "__listen_map") {
+      onOpenEpisodes?.(
+        session?.userId ? `first_map:${session.userId}` : undefined,
+      );
+      return;
+    }
     // Invite-share intercept: the chip's value contains the full
     // pre-built share message (everything after the `__invite_share:`
     // prefix). Hand it to the iOS system Share sheet — no WS send,
@@ -951,13 +960,25 @@ export function ChatScreen({
       // Final tap — emit post-map pivot text + doorway chips. The
       // user's next real input (typically a doorway chip) routes
       // through free_chat normally.
+      //
+      // Prepend a "▶ Listen to your map" chip: the first read just
+      // finished, so this is the moment to surface the narrated episode.
+      // `__listen_map` is intercepted client-side (pickQuickReply) to open
+      // the episode player — no WS send, no user bubble.
+      const listenChip: QuickReplyOption = {
+        label: lang === "he" ? "▶ להאזין למפה שלך" : "▶ Listen to your map",
+        value: "__listen_map",
+      };
+      const doorways = onOpenEpisodes
+        ? [listenChip, ...state.doorways]
+        : state.doorways;
       setMessages((m) => [
         ...m,
         {
           id: uid(),
           role: "bot",
           text: state.postText,
-          quickReplies: state.doorways,
+          quickReplies: doorways,
         },
       ]);
       paginatedReadRef.current = null;
