@@ -750,7 +750,7 @@ const styles = StyleSheet.create({
   backButton: { width: 92, paddingVertical: 4 },
   backButtonText: {
     color: theme.accent,
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.4,
   },
@@ -767,8 +767,8 @@ const styles = StyleSheet.create({
 
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
   loadingText: {
-    color: theme.textMuted,
-    fontSize: 14,
+    color: theme.textSubtle,
+    fontSize: 16,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.4,
     marginTop: 16,
@@ -785,7 +785,7 @@ const styles = StyleSheet.create({
   },
   retryText: {
     color: theme.accent,
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.4,
   },
@@ -814,7 +814,7 @@ const styles = StyleSheet.create({
   },
   rowSub: {
     color: theme.textSubtle,
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.6,
     marginTop: 5,
@@ -838,13 +838,13 @@ const styles = StyleSheet.create({
   },
   emptyBody: {
     color: theme.textSubtle,
-    fontSize: 14,
+    fontSize: 16,
     lineHeight: 21,
     textAlign: "center",
   },
   errorText: {
     color: theme.statusClosed,
-    fontSize: 13,
+    fontSize: 16,
     textAlign: "center",
     marginTop: 16,
   },
@@ -861,7 +861,7 @@ const styles = StyleSheet.create({
   },
   episodeSub: {
     color: theme.textSubtle,
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.6,
     marginTop: 8,
@@ -875,14 +875,14 @@ const styles = StyleSheet.create({
   },
   chapterMeta: {
     color: theme.textSubtle,
-    fontSize: 14,
+    fontSize: 16,
     letterSpacing: 1.0,
     marginTop: 8,
     fontFamily: theme.fontSerifItalic,
   },
   preparingText: {
     color: theme.accentDim,
-    fontSize: 13,
+    fontSize: 16,
     fontFamily: theme.fontSerifItalic,
     marginTop: 10,
   },
@@ -922,7 +922,7 @@ const styles = StyleSheet.create({
   },
   scrubTime: {
     color: theme.textSubtle,
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.4,
   },
@@ -947,7 +947,7 @@ const styles = StyleSheet.create({
   },
   transportGlyph: {
     color: theme.accent,
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 18,
     letterSpacing: -1,
     textShadowColor: theme.accent,
@@ -988,7 +988,7 @@ const styles = StyleSheet.create({
   },
   speedText: {
     color: theme.chipText,
-    fontSize: 14,
+    fontSize: 16,
     letterSpacing: 0.6,
   },
 
@@ -997,7 +997,7 @@ const styles = StyleSheet.create({
   chapterListHead: { marginBottom: 12 },
   chapterListTitle: {
     color: theme.accent,
-    fontSize: 14,
+    fontSize: 16,
     letterSpacing: 2,
     fontFamily: theme.fontSerifItalic,
     marginBottom: 8,
