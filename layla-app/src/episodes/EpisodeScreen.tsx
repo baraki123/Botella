@@ -539,6 +539,7 @@ function EpisodePlayerView({
             ).map((c: any, i: number) => {
               const active = isThis && player.index === i;
               const start = typeof c.start === "number" ? c.start : null;
+              const rtl = lang === "he";
               return (
                 <Pressable
                   key={`${c.title}-${i}`}
@@ -549,19 +550,19 @@ function EpisodePlayerView({
                     pressed && { opacity: 0.6 },
                   ]}
                 >
-                  <View style={styles.chapterTimeCell}>
-                    {active ? (
-                      <View style={styles.chapterDotActive} />
-                    ) : (
-                      <Text style={styles.chapterTime}>
-                        {start != null ? mmss(start) : i + 1}
-                      </Text>
-                    )}
-                  </View>
                   <Text
-                    style={[styles.chapterRowText, active && styles.chapterRowTextActive]}
-                    numberOfLines={1}
+                    style={[
+                      styles.chapterRowText,
+                      {
+                        textAlign: rtl ? "right" : "left",
+                        writingDirection: rtl ? "rtl" : "ltr",
+                      },
+                      active && styles.chapterRowTextActive,
+                    ]}
                   >
+                    {start != null ? (
+                      <Text style={styles.chapterTimeInline}>{`[${mmss(start)}]  `}</Text>
+                    ) : null}
                     {c.title}
                   </Text>
                 </Pressable>
@@ -812,13 +813,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   rowSub: {
-    color: theme.textMuted,
-    fontSize: 12,
+    color: theme.textSubtle,
+    fontSize: 14,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.6,
-    marginTop: 4,
+    marginTop: 5,
   },
-  rowPlayGlyph: { color: theme.accent, fontSize: 16, paddingLeft: 8 },
+  rowPlayGlyph: { color: theme.accent, fontSize: 18, paddingLeft: 8 },
 
   // Empty
   empty: {
@@ -859,24 +860,24 @@ const styles = StyleSheet.create({
     lineHeight: 40,
   },
   episodeSub: {
-    color: theme.textMuted,
-    fontSize: 13,
+    color: theme.textSubtle,
+    fontSize: 15,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.6,
-    marginTop: 6,
+    marginTop: 8,
   },
   nowPlaying: { marginTop: 28 },
   chapterTitle: {
     color: theme.accent,
-    fontSize: 21,
+    fontSize: 23,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.3,
   },
   chapterMeta: {
-    color: theme.textMuted,
-    fontSize: 12,
-    letterSpacing: 1.4,
-    marginTop: 6,
+    color: theme.textSubtle,
+    fontSize: 14,
+    letterSpacing: 1.0,
+    marginTop: 8,
     fontFamily: theme.fontSerifItalic,
   },
   preparingText: {
@@ -920,8 +921,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   scrubTime: {
-    color: theme.textMuted,
-    fontSize: 12,
+    color: theme.textSubtle,
+    fontSize: 14,
     fontFamily: theme.fontSerifItalic,
     letterSpacing: 0.4,
   },
@@ -992,56 +993,32 @@ const styles = StyleSheet.create({
   },
 
   // Chapter list
-  chapterList: { marginTop: 34 },
-  chapterListHead: { marginBottom: 8 },
+  chapterList: { marginTop: 36 },
+  chapterListHead: { marginBottom: 12 },
   chapterListTitle: {
     color: theme.accent,
-    fontSize: 12,
+    fontSize: 14,
     letterSpacing: 2,
     fontFamily: theme.fontSerifItalic,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   chapterListHairline: { width: "100%" },
+  // Apple-Podcasts-style rows: a generous tappable line, the timestamp
+  // bracketed + gold inline before the title (which wraps if long).
   chapterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 13,
-  },
-  chapterDotCell: {
-    width: 28,
-    alignItems: "center",
-  },
-  chapterTimeCell: {
-    width: 48,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  chapterTime: {
-    color: theme.textMuted,
-    fontSize: 12,
-    fontFamily: theme.fontSerifItalic,
-    letterSpacing: 0.3,
-  },
-  chapterDotActive: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: theme.accent,
-    shadowColor: theme.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 5,
-  },
-  chapterNum: {
-    color: theme.textMuted,
-    fontSize: 13,
-    fontFamily: theme.fontSerifItalic,
+    paddingVertical: 15,
+    paddingHorizontal: 2,
   },
   chapterRowText: {
-    flex: 1,
-    color: theme.textSubtle,
-    fontSize: 16,
+    color: theme.text,
+    fontSize: 18,
+    lineHeight: 26,
     fontFamily: theme.fontSerif,
+  },
+  chapterTimeInline: {
+    color: theme.accent,
+    fontSize: 16,
+    fontWeight: "600",
   },
   chapterRowTextActive: { color: theme.accent },
 
