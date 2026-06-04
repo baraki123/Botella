@@ -30,14 +30,38 @@ export interface EpisodesFetchResult {
   episodes: Episode[];
 }
 
+// The backend can cold-start (~30s) when it's been idle, so give the request a
+// generous timeout rather than letting the shelf spin forever. 50s clears a
+// cold start; beyond that we surface a retry.
+const EPISODES_TIMEOUT_MS = 50_000;
+
 export async function fetchEpisodes(jwt: string): Promise<EpisodesFetchResult> {
-  const r = await fetch(`${product.apiUrl}/v1/episodes`, {
-    headers: { Authorization: `Bearer ${jwt}` },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), EPISODES_TIMEOUT_MS);
+  let r: Response;
+  try {
+    r = await fetch(`${product.apiUrl}/v1/episodes`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      throw new Error("The server took too long to wake up. Tap to try again.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!r.ok) throw new Error(`fetch episodes failed: ${r.status}`);
   const j = (await r.json()) as { lang?: string; episodes?: Episode[] };
   return {
     lang: j?.lang === "he" ? "he" : "en",
     episodes: Array.isArray(j?.episodes) ? j.episodes : [],
   };
+}
+
+/** Wake the backend (cheap, unauth'd) so a subsequent /v1/episodes call hits a
+ * warm instance instead of cold-starting. Fire-and-forget. */
+export function prewarmBackend(): void {
+  fetch(`${product.apiUrl}/healthz`).catch(() => {});
 }

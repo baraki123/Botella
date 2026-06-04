@@ -241,6 +241,22 @@ export function EpisodeScreen({
       {episodes === null ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={theme.accent} />
+          <Text style={styles.loadingText}>
+            {_t(lang, "Gathering your episodes…", "אוספת את הפרקים שלך…")}
+          </Text>
+        </View>
+      ) : error && episodes.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptySigil}>✦</Text>
+          <Text style={styles.emptyBody}>{error}</Text>
+          <Pressable
+            onPress={load}
+            accessibilityRole="button"
+            testID="episodes-retry"
+            style={({ pressed }) => [styles.retryBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Text style={styles.retryText}>{_t(lang, "Try again", "לנסות שוב")}</Text>
+          </Pressable>
         </View>
       ) : episodes.length === 0 ? (
         <View style={styles.empty}>
@@ -255,7 +271,6 @@ export function EpisodeScreen({
               "המפה הראשונה שלך תהפוך כאן לפרק מוקרא. בקש/י את השנה הקרובה, או הוסף/י מישהו למסלול שלך, והם יהפכו גם לפרקים.",
             )}
           </Text>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
       ) : (
         <FlatList
@@ -737,7 +752,30 @@ const styles = StyleSheet.create({
   hairline: { height: 1, width: "100%" },
   divider: { height: 1, width: "82%", alignSelf: "center" },
 
-  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
+  loadingText: {
+    color: theme.textMuted,
+    fontSize: 14,
+    fontFamily: theme.fontSerifItalic,
+    letterSpacing: 0.4,
+    marginTop: 16,
+    textAlign: "center",
+  },
+  retryBtn: {
+    marginTop: 22,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceRaised,
+    borderWidth: 1,
+    borderColor: theme.doorChipRim,
+  },
+  retryText: {
+    color: theme.accent,
+    fontSize: 15,
+    fontFamily: theme.fontSerifItalic,
+    letterSpacing: 0.4,
+  },
 
   // List
   listContent: { paddingTop: 8, paddingBottom: 120 },

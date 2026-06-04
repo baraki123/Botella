@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 
+import { prewarmBackend } from "../api/episodes";
 import { fetchMe, type MeBuild } from "../api/me";
 import { connectStream, type StreamClient } from "../api/stream";
 import type { BotEvent } from "../api/types";
@@ -357,6 +358,9 @@ export function ChatScreen({
 
   // 1. Bootstrap session.
   useEffect(() => {
+    // Wake the backend early (it can cold-start ~30s after idle) so a later
+    // Episodes open hits a warm instance instead of a long spinner.
+    prewarmBackend();
     ensureSession()
       .then(setSession)
       .catch((e: Error) => setAuthError(e.message));
