@@ -230,23 +230,37 @@ export const episodePlayer = {
       return;
     }
     _applyRate(_player);
-    if (startPos > 0) {
+    // If the saved resume position is at/past the end of THIS track, start
+    // fresh. Episode progress is keyed by episode id (e.g. first_map:<uid>),
+    // so a /newchart that replaces the read with new (often shorter) content
+    // can leave a stale position beyond the new end — which would resume at
+    // the end and make "play" appear to do nothing.
+    let resumePos = startPos;
+    if (track.total > 0 && resumePos >= track.total - 3) resumePos = 0;
+    if (resumePos > 0) {
       try {
-        await (_player as any).seekTo?.(startPos);
+        await (_player as any).seekTo?.(resumePos);
       } catch {}
     }
     if (token !== _loadToken) return;
     _emit({
       chapters: track.chapters,
       durationSec: track.total,
-      positionSec: startPos,
-      index: _chapterIndexAt(startPos),
+      positionSec: resumePos,
+      index: _chapterIndexAt(resumePos),
       status: "paused",
     });
   },
 
   play(): void {
-    if (_state.status === "ended") _seek(0);
+    // Restart from the top if we're sitting at/after the end (a finished or
+    // stale-resumed episode) — otherwise play() would no-op at the end.
+    if (
+      _state.status === "ended" ||
+      (_state.durationSec > 0 && _state.positionSec >= _state.durationSec - 1)
+    ) {
+      _seek(0);
+    }
     _play();
   },
   pause(): void {
