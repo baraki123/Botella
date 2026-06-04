@@ -1,14 +1,7 @@
-// Episode player — a chapter-queue engine over a single expo-audio AudioPlayer.
-//
-// An episode is a list of chapters; each chapter is synthesized on demand via
-// the shared TTS cache (audioCache.ts), one chapter at a time. The player:
-//   - prepares chapter 0 (and prefetches chapter 1) on load,
-//   - plays / pauses / seeks within the current chapter,
-//   - sets playback rate (1×–2×),
-//   - skips prev/next and jumps to any chapter,
-//   - auto-advances when a chapter finishes, prefetching the next while the
-//     current plays (so synth latency is hidden behind playback),
-//   - notifies subscribers of position/duration/status changes.
+// Episode player — plays an episode as ONE continuous stitched audio track
+// (chapters concatenated server-side) with chapter start offsets, so a "skip to
+// chapter" is just a seek to that chapter's start time — instant, no per-chapter
+// loading. Like a real podcast.
 //
 // One voice at a time: starting playback stops the bubble "Listen" player via
 // the coordinator (and registers our own stopper so the bubble can stop us).
@@ -19,14 +12,8 @@ import {
   type AudioPlayer,
 } from "expo-audio";
 
-import { fetchAudioUri, prefetchAudioUri } from "./audioCache";
+import { fetchEpisodeTrack, type EpisodeChapterMark } from "../api/episodes";
 import { setStopper, stopOthers } from "./coordinator";
-
-export interface ChapterRef {
-  title: string;
-  text: string;
-  charCount?: number;
-}
 
 export type PlayerStatus =
   | "idle"
@@ -39,11 +26,11 @@ export type PlayerStatus =
 export interface PlayerState {
   episodeId: string | null;
   episodeTitle: string;
-  chapters: ChapterRef[];
-  index: number;
+  chapters: EpisodeChapterMark[]; // {title, start} over the whole track
+  index: number; // current chapter, derived from position
   status: PlayerStatus;
-  positionSec: number;
-  durationSec: number;
+  positionSec: number; // GLOBAL position in the episode
+  durationSec: number; // total episode length
   rate: number;
   error: string | null;
 }
@@ -51,10 +38,7 @@ export interface PlayerState {
 export interface LoadOptions {
   episodeId: string;
   episodeTitle?: string;
-  chapters: ChapterRef[];
-  voice?: string;
   jwt: string;
-  startIndex?: number;
   startPositionSec?: number;
 }
 
@@ -77,14 +61,21 @@ const _subs = new Set<(s: PlayerState) => void>();
 let _player: AudioPlayer | null = null;
 let _statusSub: { remove?: () => void } | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
-let _voice = "shimmer";
-let _jwt = "";
-// Monotonic token so a stale async load/advance can't clobber a newer one.
 let _loadToken = 0;
 
 function _emit(patch: Partial<PlayerState>) {
   _state = { ..._state, ...patch };
   for (const cb of _subs) cb(_state);
+}
+
+function _chapterIndexAt(posSec: number): number {
+  const ch = _state.chapters;
+  let idx = 0;
+  for (let i = 0; i < ch.length; i++) {
+    if (ch[i].start <= posSec + 0.25) idx = i;
+    else break;
+  }
+  return idx;
 }
 
 function _clearPoll() {
@@ -96,17 +87,16 @@ function _clearPoll() {
 
 function _startPoll() {
   // expo-audio fires playbackStatusUpdate, but its cadence is coarse on web.
-  // Poll the player's currentTime/duration while playing so the scrubber moves
+  // Poll currentTime while playing so the scrubber + active chapter track
   // smoothly. Cheap (4×/s, only while playing).
   _clearPoll();
   _pollTimer = setInterval(() => {
     const p = _player as any;
     if (!p) return;
     const position = typeof p.currentTime === "number" ? p.currentTime : _state.positionSec;
-    const duration =
-      typeof p.duration === "number" && p.duration > 0 ? p.duration : _state.durationSec;
-    if (position !== _state.positionSec || duration !== _state.durationSec) {
-      _emit({ positionSec: position, durationSec: duration });
+    const idx = _chapterIndexAt(position);
+    if (position !== _state.positionSec || idx !== _state.index) {
+      _emit({ positionSec: position, index: idx });
     }
   }, 250);
 }
@@ -128,21 +118,6 @@ function _detachPlayer() {
   }
 }
 
-function _attachStatus(player: AudioPlayer, token: number) {
-  _statusSub = player.addListener("playbackStatusUpdate", (status: any) => {
-    if (token !== _loadToken) return;
-    const patch: Partial<PlayerState> = {};
-    if (typeof status?.currentTime === "number") patch.positionSec = status.currentTime;
-    if (typeof status?.duration === "number" && status.duration > 0) {
-      patch.durationSec = status.duration;
-    }
-    if (Object.keys(patch).length) _emit(patch);
-    if (status?.didJustFinish) {
-      _onChapterFinished(token);
-    }
-  });
-}
-
 function _applyRate(player: AudioPlayer | null) {
   if (!player) return;
   // shouldCorrectPitch keeps sped-up speech natural-pitched (no chipmunk).
@@ -154,79 +129,23 @@ function _applyRate(player: AudioPlayer | null) {
   } catch {}
 }
 
-async function _loadChapterIntoPlayer(
-  index: number,
-  token: number,
-  autoplay: boolean,
-  startPositionSec = 0,
-): Promise<void> {
-  const chapter = _state.chapters[index];
-  if (!chapter) return;
-  // Stop the CURRENT chapter's audio immediately so a jump/skip doesn't keep
-  // playing the old chapter while the new one loads. Show loading on the new
-  // chapter (index updates now; the UI shows the new title + a spinner).
-  _clearPoll();
-  try {
-    _player?.pause();
-  } catch {}
-  _emit({ status: "loading", index, positionSec: startPositionSec, durationSec: 0, error: null });
-
-  let uri: string;
-  try {
-    uri = await fetchAudioUri(chapter.text, _voice, _jwt);
-  } catch (e: any) {
+function _attachStatus(player: AudioPlayer, token: number) {
+  _statusSub = player.addListener("playbackStatusUpdate", (status: any) => {
     if (token !== _loadToken) return;
-    _emit({ status: "error", error: String(e?.message || e) });
-    return;
-  }
-  if (token !== _loadToken) return;
-
-  // Swap source on the existing player if supported, else recreate.
-  try {
-    const p = _player as any;
-    if (p && typeof p.replace === "function") {
-      p.replace({ uri });
-    } else {
-      _detachPlayer();
-      _player = createAudioPlayer({ uri });
-      _attachStatus(_player, token);
+    const patch: Partial<PlayerState> = {};
+    if (typeof status?.currentTime === "number") {
+      patch.positionSec = status.currentTime;
+      patch.index = _chapterIndexAt(status.currentTime);
     }
-  } catch {
-    _detachPlayer();
-    _player = createAudioPlayer({ uri });
-    _attachStatus(_player, token);
-  }
-
-  // Apply rate + seek (best-effort; not all platforms honor every call).
-  _applyRate(_player);
-  if (startPositionSec > 0) {
-    try {
-      await (_player as any)?.seekTo?.(startPositionSec);
-    } catch {}
-  }
-
-  if (token !== _loadToken) return;
-
-  if (autoplay) {
-    _play();
-  } else {
-    _emit({ status: "paused" });
-  }
-
-  // Pipeline: warm the next chapter while this one plays.
-  const next = _state.chapters[index + 1];
-  if (next) prefetchAudioUri(next.text, _voice, _jwt);
-}
-
-function _onChapterFinished(token: number) {
-  if (token !== _loadToken) return;
-  const nextIndex = _state.index + 1;
-  if (nextIndex < _state.chapters.length) {
-    _loadChapterIntoPlayer(nextIndex, token, true, 0);
-  } else {
-    _clearPoll();
-    _emit({ status: "ended", positionSec: _state.durationSec });
-  }
+    if (typeof status?.duration === "number" && status.duration > 0) {
+      patch.durationSec = status.duration;
+    }
+    if (Object.keys(patch).length) _emit(patch);
+    if (status?.didJustFinish) {
+      _clearPoll();
+      _emit({ status: "ended" });
+    }
+  });
 }
 
 function _play() {
@@ -251,6 +170,19 @@ function _pause() {
   _emit({ status: "paused" });
 }
 
+function _seek(sec: number) {
+  if (!_player) return;
+  const clamped = Math.max(0, _state.durationSec > 0 ? Math.min(sec, _state.durationSec) : sec);
+  try {
+    (_player as any).seekTo?.(clamped);
+  } catch {}
+  _emit({
+    positionSec: clamped,
+    index: _chapterIndexAt(clamped),
+    status: _state.status === "ended" ? "paused" : _state.status,
+  });
+}
+
 export const episodePlayer = {
   getState(): PlayerState {
     return _state;
@@ -266,50 +198,55 @@ export const episodePlayer = {
     const token = ++_loadToken;
     stopOthers("episode");
     _detachPlayer();
-    _voice = opts.voice ?? "shimmer";
-    _jwt = opts.jwt;
-    const startIndex = Math.min(
-      Math.max(0, opts.startIndex ?? 0),
-      Math.max(0, opts.chapters.length - 1),
-    );
+    const startPos = opts.startPositionSec ?? 0;
     _state = {
       episodeId: opts.episodeId,
       episodeTitle: opts.episodeTitle ?? "",
-      chapters: opts.chapters,
-      index: startIndex,
+      chapters: [],
+      index: 0,
       status: "loading",
-      positionSec: opts.startPositionSec ?? 0,
+      positionSec: startPos,
       durationSec: 0,
       rate: _state.rate, // keep the user's chosen rate across episodes
       error: null,
     };
     for (const cb of _subs) cb(_state);
-    if (!opts.chapters.length) {
-      _emit({ status: "error", error: "Episode has no chapters" });
+
+    let track;
+    try {
+      track = await fetchEpisodeTrack(opts.jwt, opts.episodeId);
+    } catch (e: any) {
+      if (token !== _loadToken) return;
+      _emit({ status: "error", error: String(e?.message || e) });
       return;
     }
-    // Prepare (don't autoplay — web blocks autoplay outside a user gesture;
-    // the play disc tap will start it).
-    await _loadChapterIntoPlayer(startIndex, token, false, opts.startPositionSec ?? 0);
-    // Prefetch the rest of the episode SEQUENTIALLY (one at a time) so chapter
-    // jumps become instant without a 9-request burst saturating the browser's
-    // ~6-connection limit — that burst was leaving an on-demand jump stuck
-    // behind the others. The in-flight dedup (audioCache) means a jump to a
-    // chapter still prefetching awaits the same request instead of duplicating.
-    void (async () => {
-      for (let i = 0; i < opts.chapters.length; i++) {
-        if (token !== _loadToken) return; // a newer load superseded us
-        if (i === startIndex) continue;
-        await prefetchAudioUri(opts.chapters[i].text, _voice, _jwt);
-      }
-    })();
+    if (token !== _loadToken) return;
+
+    try {
+      _player = createAudioPlayer({ uri: track.audioUri });
+      _attachStatus(_player, token);
+    } catch (e: any) {
+      _emit({ status: "error", error: String(e?.message || e) });
+      return;
+    }
+    _applyRate(_player);
+    if (startPos > 0) {
+      try {
+        await (_player as any).seekTo?.(startPos);
+      } catch {}
+    }
+    if (token !== _loadToken) return;
+    _emit({
+      chapters: track.chapters,
+      durationSec: track.total,
+      positionSec: startPos,
+      index: _chapterIndexAt(startPos),
+      status: "paused",
+    });
   },
 
   play(): void {
-    if (_state.status === "ended") {
-      // Replay from the top of the current chapter.
-      this.seekTo(0);
-    }
+    if (_state.status === "ended") _seek(0);
     _play();
   },
   pause(): void {
@@ -321,37 +258,30 @@ export const episodePlayer = {
   },
 
   seekTo(sec: number): void {
-    if (!_player) return;
-    const clamped = Math.max(0, sec);
-    try {
-      (_player as any).seekTo?.(clamped);
-    } catch {}
-    _emit({ positionSec: clamped, status: _state.status === "ended" ? "paused" : _state.status });
+    _seek(sec);
   },
 
-  async next(): Promise<void> {
+  jumpTo(index: number): void {
+    const ch = _state.chapters[index];
+    if (!ch) return;
+    _seek(ch.start);
+  },
+
+  next(): void {
     const i = _state.index + 1;
-    if (i < _state.chapters.length) {
-      await _loadChapterIntoPlayer(i, _loadToken, _state.status === "playing", 0);
-    }
+    if (i < _state.chapters.length) this.jumpTo(i);
   },
 
-  async prev(): Promise<void> {
-    if (_state.positionSec > PREV_RESTART_THRESHOLD_SEC) {
-      this.seekTo(0);
+  prev(): void {
+    const cur = _state.chapters[_state.index];
+    const intoChapter = cur ? _state.positionSec - cur.start : _state.positionSec;
+    if (intoChapter > PREV_RESTART_THRESHOLD_SEC) {
+      this.jumpTo(_state.index);
       return;
     }
     const i = _state.index - 1;
-    if (i >= 0) {
-      await _loadChapterIntoPlayer(i, _loadToken, _state.status === "playing", 0);
-    } else {
-      this.seekTo(0);
-    }
-  },
-
-  async jumpTo(index: number): Promise<void> {
-    if (index < 0 || index >= _state.chapters.length) return;
-    await _loadChapterIntoPlayer(index, _loadToken, true, 0);
+    if (i >= 0) this.jumpTo(i);
+    else _seek(0);
   },
 
   setRate(rate: number): void {
@@ -366,7 +296,7 @@ export const episodePlayer = {
   },
 
   stop(): void {
-    _loadToken++; // invalidate any in-flight load/advance
+    _loadToken++; // invalidate any in-flight load
     _detachPlayer();
     _emit({ status: "idle", positionSec: 0 });
   },

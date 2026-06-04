@@ -65,3 +65,60 @@ export async function fetchEpisodes(jwt: string): Promise<EpisodesFetchResult> {
 export function prewarmBackend(): void {
   fetch(`${product.apiUrl}/healthz`).catch(() => {});
 }
+
+export interface EpisodeChapterMark {
+  title: string;
+  start: number; // seconds into the stitched episode
+}
+
+export interface EpisodeTrack {
+  audioUri: string;
+  total: number;
+  chapters: EpisodeChapterMark[];
+}
+
+// The first fetch triggers the server to synthesize + stitch all chapters
+// (cached after), so allow generous time before surfacing a retry.
+const TRACK_TIMEOUT_MS = 70_000;
+
+/**
+ * Fetch an episode as ONE stitched audio track + chapter start offsets. Meta
+ * first (this triggers the server build), then the audio (served from the
+ * server's cache). Returns a playable audioUri + the chapter marks.
+ */
+export async function fetchEpisodeTrack(
+  jwt: string,
+  episodeId: string,
+): Promise<EpisodeTrack> {
+  const { responseToPlayableUri } = await import("../voice/audioCache");
+  const headers = { Authorization: `Bearer ${jwt}` };
+  const q = `id=${encodeURIComponent(episodeId)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TRACK_TIMEOUT_MS);
+  try {
+    const mr = await fetch(`${product.apiUrl}/v1/episode-track-meta?${q}`, {
+      headers,
+      signal: controller.signal,
+    });
+    if (!mr.ok) throw new Error(`track meta failed: ${mr.status}`);
+    const meta = (await mr.json()) as { total?: number; chapters?: EpisodeChapterMark[] };
+    const ar = await fetch(`${product.apiUrl}/v1/episode-track?${q}`, {
+      headers,
+      signal: controller.signal,
+    });
+    if (!ar.ok) throw new Error(`track audio failed: ${ar.status}`);
+    const audioUri = await responseToPlayableUri(ar, episodeId);
+    return {
+      audioUri,
+      total: typeof meta?.total === "number" ? meta.total : 0,
+      chapters: Array.isArray(meta?.chapters) ? meta.chapters : [],
+    };
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      throw new Error("The episode took too long to prepare. Tap to try again.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}

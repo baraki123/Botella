@@ -24,6 +24,26 @@ const _CACHE_MAX = 96;
 // prefetch instead of starting a duplicate.
 const _inFlight = new Map<string, Promise<string>>();
 
+/** Turn an audio Response into a playable URI: a blob: URL on web, a written
+ * file:// on native (AVPlayer/ExoPlayer reject data: URIs). Shared by the
+ * bubble fetch and the stitched-episode track fetch. */
+export async function responseToPlayableUri(
+  res: Response,
+  cacheKeyHint: string,
+): Promise<string> {
+  if (Platform.OS === "web" && typeof URL !== "undefined" && URL.createObjectURL) {
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+  const FS = require("expo-file-system/legacy");
+  const buf = await res.arrayBuffer();
+  const base64 = bytesToBase64(buf);
+  const safe = cacheKeyHint.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  const fileUri = `${FS.cacheDirectory}track-${safe}.mp3`;
+  await FS.writeAsStringAsync(fileUri, base64, { encoding: FS.EncodingType.Base64 });
+  return fileUri;
+}
+
 export function audioCacheKey(text: string, voice = "shimmer"): string {
   // Human-readable: voice + length + first 80 chars so similar prefixes
   // don't collide.

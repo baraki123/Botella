@@ -43,7 +43,7 @@ import { theme } from "../config/theme";
 import { useReducedMotion } from "../lib/useReducedMotion";
 import { usePlayer } from "../voice/usePlayer";
 import { stopOthers } from "../voice/coordinator";
-import { episodePlayer, type ChapterRef } from "../voice/player";
+import { episodePlayer } from "../voice/player";
 
 function _t(lang: string, en: string, he: string): string {
   return lang === "he" ? he : en;
@@ -54,7 +54,7 @@ function _t(lang: string, en: string, he: string): string {
 const PROGRESS_KEY = (userId: string) => `layla:episode_progress:${userId}`;
 type ProgressMap = Record<
   string,
-  { index: number; positionSec: number; updatedAt: number }
+  { positionSec: number; updatedAt: number }
 >;
 
 async function loadProgress(userId: string): Promise<ProgressMap> {
@@ -69,12 +69,11 @@ async function loadProgress(userId: string): Promise<ProgressMap> {
 async function saveProgress(
   userId: string,
   episodeId: string,
-  index: number,
   positionSec: number,
 ): Promise<void> {
   try {
     const cur = await loadProgress(userId);
-    cur[episodeId] = { index, positionSec, updatedAt: Date.now() };
+    cur[episodeId] = { positionSec, updatedAt: Date.now() };
     await AsyncStorage.setItem(PROGRESS_KEY(userId), JSON.stringify(cur));
   } catch {
     // best effort
@@ -377,7 +376,7 @@ function EpisodePlayerView({
   lang: string;
   userId: string;
   jwt: string;
-  resume?: { index: number; positionSec: number };
+  resume?: { positionSec: number };
   onBack: () => void;
   onAskLayla?: (text: string) => void;
 }) {
@@ -386,22 +385,14 @@ function EpisodePlayerView({
   const fade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   const lift = useRef(new Animated.Value(reduced ? 0 : 14)).current;
 
-  // Load the episode into the queue engine on mount (resume if we have
-  // progress). The play disc starts playback (web blocks programmatic
-  // autoplay outside a gesture).
+  // Load the episode as ONE stitched track on mount (resume at the saved global
+  // position). The play disc starts playback (web blocks programmatic autoplay
+  // outside a gesture).
   useEffect(() => {
-    const chapters: ChapterRef[] = episode.chapters.map((c) => ({
-      title: c.title,
-      text: c.text,
-      charCount: c.char_count,
-    }));
     episodePlayer.load({
       episodeId: episode.id,
       episodeTitle: episode.title,
-      chapters,
-      voice: "shimmer",
       jwt,
-      startIndex: resume?.index ?? 0,
       startPositionSec: resume?.positionSec ?? 0,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -422,16 +413,19 @@ function EpisodePlayerView({
     if (player.episodeId !== episode.id) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveProgress(userId, episode.id, player.index, player.positionSec);
+      saveProgress(userId, episode.id, player.positionSec);
     }, 600);
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [player.index, player.positionSec, player.episodeId, episode.id, userId]);
+  }, [player.positionSec, player.episodeId, episode.id, userId]);
 
   const isThis = player.episodeId === episode.id;
   const status = isThis ? player.status : "idle";
-  const curChapter = episode.chapters[isThis ? player.index : 0];
+  // Chapter marks (with start offsets) come from the loaded track; fall back to
+  // the list's titles (no offsets) while the track is still loading.
+  const marks = isThis && player.chapters.length ? player.chapters : episode.chapters;
+  const curChapter = marks[isThis ? player.index : 0];
   const playing = status === "playing";
   const loading = status === "loading";
 
@@ -465,7 +459,8 @@ function EpisodePlayerView({
             </Text>
             <Text style={styles.chapterMeta}>
               {_t(lang, "Chapter", "פרק")} {(isThis ? player.index : 0) + 1}{" "}
-              {_t(lang, "of", "מתוך")} {episode.chapters.length}
+              {_t(lang, "of", "מתוך")} {marks.length}
+              {isThis && player.durationSec > 0 ? `  ·  ${mmss(player.durationSec)}` : ""}
             </Text>
           </View>
 
@@ -529,8 +524,12 @@ function EpisodePlayerView({
                 <GoldHairline />
               </View>
             </View>
-            {episode.chapters.map((c, i) => {
+            {(isThis && player.chapters.length
+              ? player.chapters
+              : episode.chapters
+            ).map((c: any, i: number) => {
               const active = isThis && player.index === i;
+              const start = typeof c.start === "number" ? c.start : null;
               return (
                 <Pressable
                   key={`${c.title}-${i}`}
@@ -541,9 +540,13 @@ function EpisodePlayerView({
                     pressed && { opacity: 0.6 },
                   ]}
                 >
-                  <View style={styles.chapterDotCell}>
-                    {active ? <View style={styles.chapterDotActive} /> : (
-                      <Text style={styles.chapterNum}>{i + 1}</Text>
+                  <View style={styles.chapterTimeCell}>
+                    {active ? (
+                      <View style={styles.chapterDotActive} />
+                    ) : (
+                      <Text style={styles.chapterTime}>
+                        {start != null ? mmss(start) : i + 1}
+                      </Text>
                     )}
                   </View>
                   <Text
@@ -992,6 +995,17 @@ const styles = StyleSheet.create({
   chapterDotCell: {
     width: 28,
     alignItems: "center",
+  },
+  chapterTimeCell: {
+    width: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chapterTime: {
+    color: theme.textMuted,
+    fontSize: 12,
+    fontFamily: theme.fontSerifItalic,
+    letterSpacing: 0.3,
   },
   chapterDotActive: {
     width: 7,
