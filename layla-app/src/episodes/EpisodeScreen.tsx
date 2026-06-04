@@ -462,6 +462,15 @@ function EpisodePlayerView({
               {_t(lang, "of", "מתוך")} {marks.length}
               {isThis && player.durationSec > 0 ? `  ·  ${mmss(player.durationSec)}` : ""}
             </Text>
+            {loading ? (
+              <Text style={styles.preparingText}>
+                {_t(
+                  lang,
+                  "Preparing your episode… (first listen only)",
+                  "מכינה את הפרק שלך… (רק בהאזנה הראשונה)",
+                )}
+              </Text>
+            ) : null}
           </View>
 
           <Scrubber
@@ -869,6 +878,12 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
     marginTop: 6,
     fontFamily: theme.fontSerifItalic,
+  },
+  preparingText: {
+    color: theme.accentDim,
+    fontSize: 13,
+    fontFamily: theme.fontSerifItalic,
+    marginTop: 10,
   },
 
   // Scrubber
