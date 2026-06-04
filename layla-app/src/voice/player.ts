@@ -143,6 +143,17 @@ function _attachStatus(player: AudioPlayer, token: number) {
   });
 }
 
+function _applyRate(player: AudioPlayer | null) {
+  if (!player) return;
+  // shouldCorrectPitch keeps sped-up speech natural-pitched (no chipmunk).
+  try {
+    (player as any).shouldCorrectPitch = true;
+  } catch {}
+  try {
+    (player as any).setPlaybackRate?.(_state.rate, "high");
+  } catch {}
+}
+
 async function _loadChapterIntoPlayer(
   index: number,
   token: number,
@@ -151,6 +162,13 @@ async function _loadChapterIntoPlayer(
 ): Promise<void> {
   const chapter = _state.chapters[index];
   if (!chapter) return;
+  // Stop the CURRENT chapter's audio immediately so a jump/skip doesn't keep
+  // playing the old chapter while the new one loads. Show loading on the new
+  // chapter (index updates now; the UI shows the new title + a spinner).
+  _clearPoll();
+  try {
+    _player?.pause();
+  } catch {}
   _emit({ status: "loading", index, positionSec: startPositionSec, durationSec: 0, error: null });
 
   let uri: string;
@@ -180,9 +198,7 @@ async function _loadChapterIntoPlayer(
   }
 
   // Apply rate + seek (best-effort; not all platforms honor every call).
-  try {
-    (_player as any)?.setPlaybackRate?.(_state.rate, true);
-  } catch {}
+  _applyRate(_player);
   if (startPositionSec > 0) {
     try {
       await (_player as any)?.seekTo?.(startPositionSec);
@@ -275,6 +291,14 @@ export const episodePlayer = {
     // Prepare (don't autoplay — web blocks autoplay outside a user gesture;
     // the play disc tap will start it).
     await _loadChapterIntoPlayer(startIndex, token, false, opts.startPositionSec ?? 0);
+    // Prefetch the WHOLE episode up front so chapter jumps are instant
+    // (synth is cached server + client). Fire-and-forget, deduped, silent.
+    if (token === _loadToken) {
+      for (let i = 0; i < opts.chapters.length; i++) {
+        if (i === startIndex) continue;
+        prefetchAudioUri(opts.chapters[i].text, _voice, _jwt);
+      }
+    }
   },
 
   play(): void {
@@ -328,9 +352,7 @@ export const episodePlayer = {
 
   setRate(rate: number): void {
     _emit({ rate });
-    try {
-      (_player as any)?.setPlaybackRate?.(rate, true);
-    } catch {}
+    _applyRate(_player);
   },
 
   cycleRate(): void {
