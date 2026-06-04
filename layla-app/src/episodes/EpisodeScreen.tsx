@@ -485,7 +485,7 @@ function EpisodePlayerView({
               testID="player-prev"
               style={({ pressed }) => [styles.transportBtn, pressed && { opacity: 0.5 }]}
             >
-              <Text style={styles.transportGlyph}>⏮</Text>
+              <Text style={styles.transportGlyph}>◀◀</Text>
             </Pressable>
 
             <PlayDisc
@@ -502,7 +502,7 @@ function EpisodePlayerView({
               testID="player-next"
               style={({ pressed }) => [styles.transportBtn, pressed && { opacity: 0.5 }]}
             >
-              <Text style={styles.transportGlyph}>⏭</Text>
+              <Text style={styles.transportGlyph}>▶▶</Text>
             </Pressable>
           </View>
 
@@ -928,11 +928,12 @@ const styles = StyleSheet.create({
   },
   transportGlyph: {
     color: theme.accent,
-    fontSize: 20,
-    lineHeight: 24,
+    fontSize: 15,
+    lineHeight: 18,
+    letterSpacing: -1,
     textShadowColor: theme.accent,
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 6,
+    textShadowRadius: 5,
   },
   disc: {
     width: 76,

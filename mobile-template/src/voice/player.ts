@@ -291,14 +291,18 @@ export const episodePlayer = {
     // Prepare (don't autoplay — web blocks autoplay outside a user gesture;
     // the play disc tap will start it).
     await _loadChapterIntoPlayer(startIndex, token, false, opts.startPositionSec ?? 0);
-    // Prefetch the WHOLE episode up front so chapter jumps are instant
-    // (synth is cached server + client). Fire-and-forget, deduped, silent.
-    if (token === _loadToken) {
+    // Prefetch the rest of the episode SEQUENTIALLY (one at a time) so chapter
+    // jumps become instant without a 9-request burst saturating the browser's
+    // ~6-connection limit — that burst was leaving an on-demand jump stuck
+    // behind the others. The in-flight dedup (audioCache) means a jump to a
+    // chapter still prefetching awaits the same request instead of duplicating.
+    void (async () => {
       for (let i = 0; i < opts.chapters.length; i++) {
+        if (token !== _loadToken) return; // a newer load superseded us
         if (i === startIndex) continue;
-        prefetchAudioUri(opts.chapters[i].text, _voice, _jwt);
+        await prefetchAudioUri(opts.chapters[i].text, _voice, _jwt);
       }
-    }
+    })();
   },
 
   play(): void {

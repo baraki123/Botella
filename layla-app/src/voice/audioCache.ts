@@ -18,8 +18,11 @@ import { bytesToBase64 } from "../lib/base64";
 const _audioCache = new Map<string, string>();
 const _CACHE_MAX = 96;
 
-// In-flight prefetch keys — stops a duplicate request before the first lands.
-const _prefetchInFlight = new Set<string>();
+// In-flight requests keyed by cacheKey → the SAME promise is shared by the
+// bubble Listen tap, an episode chapter jump, and a background prefetch, so a
+// chapter never gets synthesized twice and a jump can await an already-running
+// prefetch instead of starting a duplicate.
+const _inFlight = new Map<string, Promise<string>>();
 
 export function audioCacheKey(text: string, voice = "shimmer"): string {
   // Human-readable: voice + length + first 80 chars so similar prefixes
@@ -48,63 +51,71 @@ export async function fetchAudioUri(
     _audioCache.set(key, cached);
     return cached;
   }
+  // Reuse an in-flight request (prefetch or another tap) instead of a dupe.
+  const existing = _inFlight.get(key);
+  if (existing) return existing;
 
-  const res = await fetch(`${product.apiUrl}/v1/tts/synthesize`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ text, voice }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`TTS synth failed (${res.status}): ${detail.slice(0, 200)}`);
-  }
-
-  let url: string;
-  if (Platform.OS === "web" && typeof URL !== "undefined" && URL.createObjectURL) {
-    const blob = await res.blob();
-    url = URL.createObjectURL(blob);
-  } else {
-    // Native: write bytes to a real file and play from file:// (see the
-    // CLAUDE.md note — typed expo-file-system 19+ methods throw; use /legacy).
-    const FS = require("expo-file-system/legacy");
-    const buf = await res.arrayBuffer();
-    const base64 = bytesToBase64(buf);
-    const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-    const fileUri = `${FS.cacheDirectory}tts-${safeKey}.mp3`;
-    await FS.writeAsStringAsync(fileUri, base64, {
-      encoding: FS.EncodingType.Base64,
+  const p = (async (): Promise<string> => {
+    const res = await fetch(`${product.apiUrl}/v1/tts/synthesize`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text, voice }),
     });
-    url = fileUri;
-  }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`TTS synth failed (${res.status}): ${detail.slice(0, 200)}`);
+    }
 
-  _audioCache.set(key, url);
-  if (_audioCache.size > _CACHE_MAX) {
-    const oldest = _audioCache.keys().next().value;
-    if (oldest) _audioCache.delete(oldest);
+    let url: string;
+    if (Platform.OS === "web" && typeof URL !== "undefined" && URL.createObjectURL) {
+      const blob = await res.blob();
+      url = URL.createObjectURL(blob);
+    } else {
+      // Native: write bytes to a real file and play from file:// (see the
+      // CLAUDE.md note — typed expo-file-system 19+ methods throw; use /legacy).
+      const FS = require("expo-file-system/legacy");
+      const buf = await res.arrayBuffer();
+      const base64 = bytesToBase64(buf);
+      const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+      const fileUri = `${FS.cacheDirectory}tts-${safeKey}.mp3`;
+      await FS.writeAsStringAsync(fileUri, base64, {
+        encoding: FS.EncodingType.Base64,
+      });
+      url = fileUri;
+    }
+
+    _audioCache.set(key, url);
+    if (_audioCache.size > _CACHE_MAX) {
+      const oldest = _audioCache.keys().next().value;
+      if (oldest) _audioCache.delete(oldest);
+    }
+    return url;
+  })();
+
+  _inFlight.set(key, p);
+  try {
+    return await p;
+  } finally {
+    _inFlight.delete(key);
   }
-  return url;
 }
 
 /**
  * Fire-and-forget prefetch — warms the cache so a later fetch is instant.
- * Idempotent: a no-op while in flight or once cached. Errors swallowed.
+ * Shares the same in-flight promise as fetchAudioUri (no duplicate synth).
+ * Errors swallowed.
  */
 export async function prefetchAudioUri(
   text: string,
   voice: string,
   jwt: string,
 ): Promise<void> {
-  const key = audioCacheKey(text, voice);
-  if (_audioCache.has(key) || _prefetchInFlight.has(key)) return;
-  _prefetchInFlight.add(key);
   try {
     await fetchAudioUri(text, voice, jwt);
   } catch {
     // Silent — the on-demand fetch will surface the error if it matters.
-  } finally {
-    _prefetchInFlight.delete(key);
   }
 }
